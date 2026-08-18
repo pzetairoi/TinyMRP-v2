@@ -54,6 +54,48 @@ prompt() {
   printf '%s' "${value:-$default}"
 }
 
+# A name no public certificate authority will ever issue for. Caddy detects
+# these itself and quietly signs them with its own CA instead of asking
+# Let's Encrypt. That works, but every browser then shows a warning until the
+# CA is trusted, so detect the same set and say it out loud.
+is_internal_domain() {
+  local d="${1,,}"
+  case "$d" in
+    *.local|*.localdomain|*.localhost|*.internal|*.intranet|*.lan|*.home.arpa|*.test|*.invalid|*.example) return 0 ;;
+    # RFC 2606 documentation names. These resolve, so ACME would be attempted
+    # and would fail; treat the prompt default as internal rather than let an
+    # unedited answer walk into a certificate error.
+    *.example.com|*.example.org|*.example.net) return 0 ;;
+    *.*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+explain_access_modes() {
+  cat <<'MODES'
+
+How will people reach this server? This answer decides everything else, so it
+is worth thirty seconds.
+
+  localhost  Only this machine, at http://localhost:<port>. For trying TinyMRP
+             out. No other computer can reach it.
+
+  lan        Any machine on your network, at http://<ip-or-name>:<port>.
+             Plain HTTP, no certificate, ports 80 and 443 stay free. Choose
+             this when you have an IP or hostname but no certificate story.
+
+  domain     Any machine, at https://<your-domain>, with TLS terminated by a
+             Caddy reverse proxy this installer runs for you. Needs TCP 80 and
+             443 free. Choose this when users type a name, not an IP.
+             - a public name (mrp.example.com) gets a real Let's Encrypt
+               certificate automatically;
+             - an internal-only name (mrp.company.local) gets one from Caddy's
+               own authority, which browsers distrust until you install it.
+               This installer prints exactly how, at the end.
+
+MODES
+}
+
 port_in_use() {
   local port="$1"
   if command -v ss >/dev/null 2>&1; then
@@ -73,7 +115,11 @@ write_env_value() {
   printf '%s="%s"\n' "$1" "$2" >>"$ENV_FILE"
 }
 
-[[ ! -e "$ENV_FILE" ]] || die "$ENV_FILE already exists. Use ./tinymrp.sh for this installation."
+[[ ! -e "$ENV_FILE" ]] || die "$ENV_FILE already exists, so TinyMRP is already installed here.
+To change the address, port or access mode, run:  $SCRIPT_DIR/tinymrp.sh reconfigure
+To start, inspect or back it up, run:              $SCRIPT_DIR/tinymrp.sh status
+To install again from scratch (deletes the database and configuration):
+  $SCRIPT_DIR/tinymrp.sh uninstall --delete-data --yes && rm $ENV_FILE"
 command -v docker >/dev/null 2>&1 || die "Install Docker Engine and the Compose v2 plugin first."
 docker info >/dev/null 2>&1 || die "Docker is installed but its daemon is not running."
 docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is required."
@@ -87,10 +133,28 @@ if [[ "${TINYMRP_NON_INTERACTIVE:-0}" == "1" ]]; then
   admin_password="${TINYMRP_ADMIN_PASSWORD:?TINYMRP_ADMIN_PASSWORD is required in non-interactive mode}"
 else
   deliverables="$(prompt 'Deliverables folder' "$HOME/TinyMRP/Deliverables")"
+  explain_access_modes
   mode="$(prompt 'Access mode (localhost/lan/domain)' 'localhost')"
 fi
 case "$mode" in localhost|lan|domain) ;; *) die "Access mode must be localhost, lan, or domain." ;; esac
-if [[ "${TINYMRP_NON_INTERACTIVE:-0}" != "1" ]]; then port="$(prompt 'TinyMRP localhost port' '5000')"; fi
+if [[ "${TINYMRP_NON_INTERACTIVE:-0}" != "1" ]]; then
+  if [[ "$mode" == "domain" ]]; then
+    # In domain mode this is emphatically NOT the port users type - they type
+    # 443, implicitly, via https://. Asking for "the port" here without saying
+    # so invites the answer "443", which would collide with Caddy.
+    cat <<'PORTNOTE'
+
+In domain mode users reach TinyMRP on 443, through https://<domain>. The port
+below is only a loopback port on this machine, used to reach the app directly
+when diagnosing something behind the proxy. Press Enter to accept 5000.
+PORTNOTE
+    port="$(prompt 'Internal loopback port for diagnostics' '5000')"
+  else
+    printf '\nThe port users type after the address, as in %s:<port>.\n' \
+      "$([[ "$mode" == "lan" ]] && printf 'http://192.168.1.50' || printf 'http://localhost')"
+    port="$(prompt 'TinyMRP port' '5000')"
+  fi
+fi
 [[ "$port" =~ ^[0-9]+$ && "$port" -ge 1 && "$port" -le 65535 ]] || die "Port must be between 1 and 65535."
 port_in_use "$port" && die "TCP port $port is already in use."
 if [[ "${TINYMRP_NON_INTERACTIVE:-0}" != "1" ]]; then admin_email="$(prompt 'Administrator email' 'admin@example.com')"; fi
@@ -140,6 +204,7 @@ url="$origin"
 # rate-limit bucket and a forged address in the audit log. Domain mode puts
 # Caddy in front, which overwrites them.
 proxy_hops=0
+internal_tls=0
 if [[ "$mode" == "lan" ]]; then
   bind_ip=0.0.0.0
   if [[ "${TINYMRP_NON_INTERACTIVE:-0}" == "1" ]]; then
@@ -157,8 +222,27 @@ elif [[ "$mode" == "domain" ]]; then
     domain="${TINYMRP_DOMAIN:?TINYMRP_DOMAIN is required for non-interactive domain mode}"
     acme_email="${ACME_EMAIL:?ACME_EMAIL is required for non-interactive domain mode}"
   else
-    domain="$(prompt 'Public domain (DNS must point here)' 'tinymrp.example.com')"
-    acme_email="$(prompt 'ACME certificate email' "$admin_email")"
+    domain="$(prompt 'Domain users will type (DNS or hosts file must point here)' 'tinymrp.example.com')"
+  fi
+  acme_email="${acme_email:-${ACME_EMAIL:-$admin_email}}"
+  if is_internal_domain "$domain"; then
+    # No public CA can issue for a name like this, so Caddy signs it with its
+    # own. That is a working, encrypted install - but not a trusted one until
+    # the root certificate reaches every client, and learning that from a
+    # browser warning instead of from us is what costs an afternoon.
+    internal_tls=1
+    printf '\nNOTE: %s is an internal-only name, so no public certificate\n' "$domain"
+    printf 'authority can issue for it. Caddy will generate its own certificate\n'
+    printf 'instead. TinyMRP works over HTTPS immediately, but until you install\n'
+    printf "Caddy's root certificate on each machine, browsers show \"your\n"
+    printf 'connection is not private" and the SolidWorks add-in refuses to\n'
+    printf 'connect. The commands for that are printed at the end of this\n'
+    printf 'install. Nothing else changes.\n\n'
+  elif [[ "${TINYMRP_NON_INTERACTIVE:-0}" != "1" ]]; then
+    printf '\n%s is a public name, so Caddy fetches a real certificate from\n' "$domain"
+    printf "Let's Encrypt on first start. That needs public DNS already pointing\n"
+    printf 'at this machine, and TCP 80 reachable from the internet.\n\n'
+    acme_email="$(prompt 'Email for certificate expiry notices' "$admin_email")"
   fi
   origin="https://$domain"
   url="$origin"
@@ -228,8 +312,14 @@ if [[ "$BUILD_FROM_SOURCE" == "1" ]]; then
   printf 'Building %s:%s from %s (this takes several minutes the first time)...\n' \
     "$image_repository" "$version" "$REPO_ROOT"
   docker build -f "$REPO_ROOT/docker/app/Dockerfile" -t "${image_repository}:${version}" "$REPO_ROOT"
-  # The tag exists only on this host, so any pull attempt is a guaranteed failure.
-  : "${TINYMRP_INSTALL_PULL:=never}"
+  # The app tag exists only on this host, so it must never be pulled. But
+  # --pull is a stack-wide flag, and mongo, redis and caddy still have to come
+  # down from a registry on a machine that has never run this stack. `never`
+  # blocked those too, so every first --build install on a clean host died with
+  # "No such image: mongo:6.0@sha256:..." before a container was created.
+  # `missing` is the only mode that gets both halves right: pull what is
+  # absent, leave the image we just built alone.
+  : "${TINYMRP_INSTALL_PULL:=missing}"
 fi
 
 pull_mode="${TINYMRP_INSTALL_PULL:-always}"
@@ -263,4 +353,22 @@ if [[ -n "$demo_output" ]]; then
   printf '  docker compose --env-file %s -f %s exec -T app flask --app run.py demo remove --disable\n' \
     "$ENV_FILE" "$SCRIPT_DIR/compose.yaml"
 fi
+if [[ "$internal_tls" == "1" ]]; then
+  printf "\n%s uses a certificate from Caddy's own authority. Export the root\n" "$domain"
+  printf 'certificate once:\n\n'
+  printf '  docker compose --env-file %s \\\n' "$ENV_FILE"
+  printf '    -f %s \\\n' "$SCRIPT_DIR/compose.yaml"
+  printf '    cp caddy:/data/caddy/pki/authorities/local/root.crt ./tinymrp-root-ca.crt\n\n'
+  printf 'Then install tinymrp-root-ca.crt as a trusted root on every machine\n'
+  printf 'that opens TinyMRP or runs the SolidWorks add-in:\n\n'
+  printf '  Windows  certutil -addstore -f Root tinymrp-root-ca.crt   (as Administrator)\n'
+  printf '  Ubuntu   sudo cp tinymrp-root-ca.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates\n'
+  printf '  macOS    sudo security add-trusted-cert -d -k /Library/Keychains/System.keychain tinymrp-root-ca.crt\n'
+  printf '  Firefox  Settings > Privacy & Security > Certificates > View Certificates > Authorities > Import\n\n'
+  printf 'Every client must also resolve %s to this machine, through your\n' "$domain"
+  printf 'internal DNS or a hosts-file entry.\n'
+fi
+
 printf '\nUse %s/tinymrp.sh status|logs|backup|update for operations.\n' "$SCRIPT_DIR"
+printf 'To change the address, port or access mode later, run:\n'
+printf '  %s/tinymrp.sh reconfigure\n' "$SCRIPT_DIR"

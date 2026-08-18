@@ -45,7 +45,10 @@ guide explains the questions it asks and every option it accepts.
 
 The same catalogue, with every option each script accepts, is generated from
 the scripts themselves and shown in the application's own help under
-**Deployment: step by step → Every deployment script and its options**.
+**Installing and running the server → Every deployment script and its options**.
+
+These pages are the single source of truth for installing TinyMRP. The
+application's own help does not repeat them; it points here.
 
 None of these paths require Nextcloud. Nextcloud is an **optional** file-sync
 front end for the VPS path only; see

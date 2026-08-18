@@ -59,6 +59,42 @@ function Get-ReleaseValue([string]$Name) {
     if ($line) { return $line.Substring($Name.Length + 1).Trim() }
     return ''
 }
+# A name no public certificate authority will ever issue for. Caddy detects
+# these itself and signs them with its own CA instead of asking Let's Encrypt,
+# which works but makes browsers warn until that CA is trusted. Kept in step
+# with is_internal_domain() in install.sh.
+function Test-InternalDomain([string]$Domain) {
+    $d = $Domain.ToLowerInvariant()
+    foreach ($suffix in @('.local', '.localdomain', '.localhost', '.internal', '.intranet',
+                          '.lan', '.home.arpa', '.test', '.invalid', '.example',
+                          '.example.com', '.example.org', '.example.net')) {
+        if ($d.EndsWith($suffix)) { return $true }
+    }
+    return (-not $d.Contains('.'))
+}
+function Show-AccessModes {
+    Write-Host @'
+
+How will people reach this server? This answer decides everything else, so it
+is worth thirty seconds.
+
+  localhost  Only this machine, at http://localhost:<port>. For trying TinyMRP
+             out. No other computer can reach it.
+
+  lan        Any machine on your network, at http://<ip-or-name>:<port>.
+             Plain HTTP, no certificate, ports 80 and 443 stay free.
+
+  domain     Any machine, at https://<your-domain>, with TLS terminated by a
+             Caddy reverse proxy this installer runs for you. Needs TCP 80 and
+             443 free.
+             - a public name (mrp.example.com) gets a real Let's Encrypt
+               certificate automatically;
+             - an internal-only name (mrp.company.local) gets one from Caddy's
+               own authority, which browsers distrust until you install it.
+               This installer prints exactly how, at the end.
+
+'@
+}
 function Invoke-DockerCommand {
     $DockerArguments = @($args)
     $savedPreference = $ErrorActionPreference
@@ -77,7 +113,7 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { Stop-WithError 'I
 & cmd.exe /d /c "docker compose version >nul 2>nul"; if ($LASTEXITCODE -ne 0) { Stop-WithError 'Docker Compose v2 is required.' }
 
 if (-not $DeliverablesPath) { $DeliverablesPath = Read-Default 'Deliverables folder' 'C:\TinyMRP\Deliverables' }
-if (-not $AccessMode) { $AccessMode = Read-Default 'Access mode (localhost/lan/domain)' 'localhost' }
+if (-not $AccessMode) { Show-AccessModes; $AccessMode = Read-Default 'Access mode (localhost/lan/domain)' 'localhost' }
 if ($AccessMode -notin @('localhost', 'lan', 'domain')) { Stop-WithError 'Access mode must be localhost, lan, or domain.' }
 if (Test-Port $Port) { Stop-WithError "TCP port $Port is already in use." }
 if (-not $AdminEmail) { $AdminEmail = Read-Default 'Administrator email' 'admin@example.com' }
@@ -116,7 +152,7 @@ if ($Version -notmatch '^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$') { Stop-Wi
 # header can be believed: a client that sends its own would get a private
 # rate-limit bucket and a forged address in the audit log. Domain mode puts
 # Caddy in front, which overwrites them.
-$bindIp = '127.0.0.1'; $domain = ''; $acmeEmail = ''; $origin = "http://localhost:$Port"; $url = $origin; $proxyHops = 0
+$bindIp = '127.0.0.1'; $domain = ''; $acmeEmail = ''; $origin = "http://localhost:$Port"; $url = $origin; $proxyHops = 0; $internalTls = $false
 if ($AccessMode -eq 'lan') {
     if (-not $Address) {
         $detected = Get-NetIPAddress -AddressFamily IPv4 -PrefixOrigin Dhcp -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '169.254.*' } | Select-Object -ExpandProperty IPAddress -First 1
@@ -125,8 +161,30 @@ if ($AccessMode -eq 'lan') {
     $bindIp = '0.0.0.0'; $origin = "http://${Address}:$Port"; $url = $origin
 } elseif ($AccessMode -eq 'domain') {
     if ((Test-Port 80) -or (Test-Port 443)) { Stop-WithError 'Domain mode requires free TCP ports 80 and 443.' }
-    if (-not $Address) { $Address = Read-Default 'Public domain (DNS must point here)' 'tinymrp.example.com' }
-    $domain = $Address; $acmeEmail = Read-Default 'ACME certificate email' $AdminEmail
+    if (-not $Address) { $Address = Read-Default 'Domain users will type (DNS or hosts file must point here)' 'tinymrp.example.com' }
+    $domain = $Address
+    if (Test-InternalDomain $domain) {
+        # No public CA can issue for a name like this, so Caddy signs it itself.
+        # Real HTTPS, but not trusted until the root certificate is distributed.
+        $internalTls = $true
+        $acmeEmail = $AdminEmail
+        Write-Host ""
+        Write-Host "NOTE: $domain is an internal-only name, so no public certificate"
+        Write-Host "authority can issue for it. Caddy will generate its own certificate"
+        Write-Host "instead. TinyMRP works over HTTPS immediately, but until you install"
+        Write-Host "Caddy's root certificate on each machine, browsers show ""your"
+        Write-Host "connection is not private"" and the SolidWorks add-in refuses to"
+        Write-Host "connect. The commands for that are printed at the end. Nothing else"
+        Write-Host "changes."
+        Write-Host ""
+    } else {
+        Write-Host ""
+        Write-Host "$domain is a public name, so Caddy fetches a real certificate from"
+        Write-Host "Let's Encrypt on first start. That needs public DNS already pointing"
+        Write-Host "at this machine, and TCP 80 reachable from the internet."
+        Write-Host ""
+        $acmeEmail = Read-Default 'Email for certificate expiry notices' $AdminEmail
+    }
     $origin = "https://$domain"; $url = $origin; $proxyHops = 1
 }
 
@@ -175,8 +233,13 @@ try {
     if ($Build) {
         Write-Host "Building ${ImageRepository}:${Version} from $RepoRoot (several minutes on a first build)..."
         Invoke-DockerCommand build -f $DockerfilePath -t "${ImageRepository}:${Version}" $RepoRoot
-        # The tag exists only on this host, so any pull attempt is certain to fail.
-        if (-not $env:TINYMRP_INSTALL_PULL) { $env:TINYMRP_INSTALL_PULL = 'never' }
+        # The app tag exists only on this host, so it must never be pulled. But
+        # --pull is a stack-wide flag, and mongo, redis and caddy still have to
+        # come down from a registry on a machine that has never run this stack.
+        # 'never' blocked those too, so every first -Build install on a clean
+        # host died with "No such image: mongo:6.0@sha256:...". 'missing' pulls
+        # what is absent and leaves the image we just built alone.
+        if (-not $env:TINYMRP_INSTALL_PULL) { $env:TINYMRP_INSTALL_PULL = 'missing' }
     }
     $pullMode = if ($env:TINYMRP_INSTALL_PULL) { $env:TINYMRP_INSTALL_PULL } else { 'always' }
     if ($pullMode -notin @('always', 'missing', 'never')) { Stop-WithError 'TINYMRP_INSTALL_PULL must be always, missing, or never.' }
@@ -243,4 +306,24 @@ if ($WithDemoData -and $demoOutput) {
     Write-Host "`nRemove them before this instance holds real data:"
     Write-Host "  docker compose --env-file `"$EnvFile`" -f `"$ComposeFile`" exec -T app flask --app run.py demo remove --disable"
 }
-Write-Host "Use .\tinymrp.ps1 status|logs|backup|update for operations."
+if ($internalTls) {
+    Write-Host "`n$domain uses a certificate from Caddy's own authority. Export the"
+    Write-Host 'root certificate once:'
+    Write-Host ''
+    Write-Host "  docker compose --env-file `"$EnvFile`" -f `"$ComposeFile`" ``"
+    Write-Host '    cp caddy:/data/caddy/pki/authorities/local/root.crt .\tinymrp-root-ca.crt'
+    Write-Host ''
+    Write-Host 'Then install tinymrp-root-ca.crt as a trusted root on every machine'
+    Write-Host 'that opens TinyMRP or runs the SolidWorks add-in:'
+    Write-Host ''
+    Write-Host '  Windows  certutil -addstore -f Root tinymrp-root-ca.crt   (as Administrator)'
+    Write-Host '  Ubuntu   sudo cp tinymrp-root-ca.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates'
+    Write-Host '  Firefox  Settings > Privacy & Security > Certificates > View Certificates > Authorities > Import'
+    Write-Host ''
+    Write-Host "Every client must also resolve $domain to this machine, through your"
+    Write-Host 'internal DNS or a hosts-file entry.'
+}
+
+Write-Host "`nUse .\tinymrp.ps1 status|logs|backup|update for operations."
+Write-Host 'To change the address, port or access mode later, run:'
+Write-Host '  .\tinymrp.ps1 reconfigure'

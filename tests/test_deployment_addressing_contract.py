@@ -198,3 +198,114 @@ def test_nginx_auth_request_does_not_use_a_variable_in_its_uri(conf):
         assert "X-Original-URI $request_uri" in directives, (
             f"{conf} uses auth_request but never forwards the requested path"
         )
+
+
+# --------------------------------------------------------------------------
+# The Community stack must actually start on a machine that has never run it
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "installer",
+    ["deploy/community/install.sh", "deploy/community/install.ps1"],
+)
+def test_building_from_source_still_pulls_the_third_party_images(installer):
+    """--build must not block Mongo, Redis and Caddy from being pulled.
+
+    The app image built from a checkout exists only on that host, so pulling it
+    is certain to fail - but `--pull` is a stack-wide flag. Setting it to
+    `never` also blocked the three images that DO have to come from a registry,
+    so the first --build install on a clean machine died with
+    "No such image: mongo:6.0@sha256:..." before a container was created.
+    `missing` is the only value that pulls what is absent and leaves the
+    locally built image alone.
+    """
+    text = _read(installer)
+    assert "TINYMRP_INSTALL_PULL" in text, f"{installer} no longer sets a pull mode"
+    # Only the default assigned after a source build matters. Both scripts also
+    # name 'never' when validating an operator-supplied override, which is fine.
+    assignments = [
+        ':= "${TINYMRP_INSTALL_PULL:=missing}"' in text
+        or '${TINYMRP_INSTALL_PULL:=missing}' in text,
+        "$env:TINYMRP_INSTALL_PULL = 'missing'" in text,
+    ]
+    assert any(assignments), (
+        f"{installer} does not default the stack-wide pull mode to 'missing' "
+        f"after --build; 'never' blocks mongo/redis/caddy on a host that has "
+        f"never pulled them"
+    )
+    assert "${TINYMRP_INSTALL_PULL:=never}" not in text
+    assert "$env:TINYMRP_INSTALL_PULL = 'never'" not in text
+
+
+def test_caddy_keeps_the_capability_its_binary_requires():
+    """Domain mode cannot start if Caddy is stripped of NET_BIND_SERVICE.
+
+    /usr/bin/caddy carries a cap_net_bind_service file capability so it can
+    bind 80 and 443 without being root. `cap_drop: ALL` empties the bounding
+    set, and the kernel then refuses to exec a binary whose permitted file caps
+    it cannot grant - the container dies with
+    "exec /usr/bin/caddy: operation not permitted" before Caddy logs anything.
+    """
+    text = _read("deploy/community/compose.yaml")
+    caddy = text[text.index("  caddy:") :]
+    assert "cap_drop" in caddy, "caddy should still drop capabilities by default"
+    assert "NET_BIND_SERVICE" in caddy, (
+        "caddy drops ALL capabilities without granting back NET_BIND_SERVICE; "
+        "the container cannot exec and domain mode never starts"
+    )
+
+
+def test_caddy_has_a_healthcheck_so_wait_cannot_report_a_dead_proxy():
+    """`up --wait` needs something to wait for on the user-facing service.
+
+    Without a healthcheck it accepted a created-but-crash-looping Caddy as
+    success, so the installer printed "TinyMRP Community is ready at
+    https://..." over a proxy that never served a byte.
+    """
+    text = _read("deploy/community/compose.yaml")
+    caddy = text[text.index("  caddy:") :]
+    assert "healthcheck:" in caddy, (
+        "caddy has no healthcheck, so `up --wait` cannot tell a working proxy "
+        "from a crash-looping one"
+    )
+
+
+def test_operators_can_change_the_address_without_hand_editing_env():
+    """The eight addressing keys must be changeable by a supported command.
+
+    They have to agree with each other, and when they do not the symptom is a
+    silent login loop rather than an error, so hand-editing .env is a trap.
+    """
+    text = _read("deploy/community/tinymrp.sh")
+    assert "reconfigure)" in text, "tinymrp.sh no longer dispatches `reconfigure`"
+    for key in (
+        "ACCESS_MODE",
+        "APP_BIND_IP",
+        "APP_PORT",
+        "TINYMRP_URL",
+        "TINYMRP_TRUSTED_PROXY_HOPS",
+        "TINYMRP_ALLOWED_ORIGINS",
+        "TINYMRP_DOMAIN",
+        "ACME_EMAIL",
+    ):
+        assert f"env_set {key} " in text, (
+            f"reconfigure does not rewrite {key}, so it can leave the eight "
+            f"addressing keys disagreeing"
+        )
+
+
+def test_the_installer_warns_that_an_internal_domain_is_not_publicly_trusted():
+    """A .local domain gets a Caddy-signed certificate, not a Let's Encrypt one.
+
+    That is a working HTTPS install, but every browser distrusts it until the
+    root certificate is distributed. Finding that out from a browser warning
+    instead of from the installer is what costs an afternoon.
+    """
+    text = _read("deploy/community/install.sh")
+    assert "is_internal_domain" in text
+    assert "*.local" in text, "the internal-domain test no longer covers .local"
+    assert "root.crt" in text, (
+        "the installer never tells an internal-domain operator how to export "
+        "the root certificate their clients must trust"
+    )

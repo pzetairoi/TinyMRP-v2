@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-08-15 21:51 UTC",
-  "commit": "0086d5a",
+  "generated_at": "2026-08-18 05:44 UTC",
+  "commit": "b4465cf",
   "items": [
     {
       "id": "getting-started",
@@ -303,126 +303,20 @@
       ]
     },
     {
-      "id": "installation",
-      "title": "Installation",
+      "id": "installing-and-running-the-server",
+      "title": "Installing and running the server",
       "sections": [
         {
-          "id": "full-deployment-guides",
-          "title": "Full deployment guides"
+          "id": "which-guide",
+          "title": "Which guide"
         },
         {
-          "id": "deployment-options",
-          "title": "Deployment Options"
+          "id": "then-whichever-path-you-took",
+          "title": "Then, whichever path you took"
         },
         {
-          "id": "prerequisites",
-          "title": "Prerequisites"
-        },
-        {
-          "id": "first-time-setup-guided-ubuntu",
-          "title": "First-Time Setup (Guided Ubuntu)"
-        },
-        {
-          "id": "dns-and-domain-setup",
-          "title": "DNS And Domain Setup"
-        },
-        {
-          "id": "nextcloud",
-          "title": "Nextcloud"
-        },
-        {
-          "id": "updating-and-rollback",
-          "title": "Updating And Rollback"
-        },
-        {
-          "id": "deliverables-smoke-test",
-          "title": "Deliverables Smoke Test"
-        },
-        {
-          "id": "recover-a-broken-caddy-instance",
-          "title": "Recover A Broken Caddy Instance"
-        },
-        {
-          "id": "local-vm-mode",
-          "title": "Local VM Mode"
-        },
-        {
-          "id": "authentication-on-guided-caddy-instances",
-          "title": "Authentication on guided Caddy instances"
-        },
-        {
-          "id": "windows-lan-only-setup-no-docker",
-          "title": "Windows LAN-Only Setup (No Docker)"
-        },
-        {
-          "id": "file-storage-rules",
-          "title": "File Storage Rules"
-        },
-        {
-          "id": "upload-pack-limits-2",
-          "title": "Upload Pack Limits"
-        },
-        {
-          "id": "local-development-advanced",
-          "title": "Local Development (Advanced)"
-        },
-        {
-          "id": "upgrade-procedure",
-          "title": "Upgrade Procedure"
-        },
-        {
-          "id": "backup-recommendations",
-          "title": "Backup Recommendations"
-        },
-        {
-          "id": "security-baseline",
-          "title": "Security Baseline"
-        },
-        {
-          "id": "help-build-command",
-          "title": "Help Build Command"
-        }
-      ]
-    },
-    {
-      "id": "deployment-step-by-step",
-      "title": "Deployment: step by step",
-      "sections": [
-        {
-          "id": "the-only-three-things-you-configure",
-          "title": "The only three things you configure"
-        },
-        {
-          "id": "which-variant-am-i",
-          "title": "Which variant am I?"
-        },
-        {
-          "id": "a-linux-vm-or-server-with-docker",
-          "title": "A. Linux VM or server with Docker"
-        },
-        {
-          "id": "b-windows-with-docker-desktop",
-          "title": "B. Windows with Docker Desktop"
-        },
-        {
-          "id": "c-linux-without-docker",
-          "title": "C. Linux without Docker"
-        },
-        {
-          "id": "d-windows-lan-service",
-          "title": "D. Windows LAN service"
-        },
-        {
-          "id": "e-windows-restricted-host-runpy",
-          "title": "E. Windows restricted host (`run.py`)"
-        },
-        {
-          "id": "f-vps-with-several-instances",
-          "title": "F. VPS with several instances"
-        },
-        {
-          "id": "after-any-install-first-login-and-sample-data",
-          "title": "After any install: first login and sample data"
+          "id": "the-recommended-path-in-brief",
+          "title": "The recommended path in brief"
         },
         {
           "id": "every-deployment-script-and-its-options",
@@ -431,10 +325,6 @@
         {
           "id": "every-configuration-variable",
           "title": "Every configuration variable"
-        },
-        {
-          "id": "when-something-is-wrong",
-          "title": "When something is wrong"
         }
       ]
     },

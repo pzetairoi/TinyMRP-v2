@@ -427,6 +427,12 @@ For a single workstation, VM or small server. From a clone of this repository:
 ./deploy/community/install.sh --build --with-demo-data
 ```
 
+**The complete walkthrough — prerequisites, every question the installer asks,
+firewall, TLS, first login, day-to-day operation and every failure mode — is
+[`docs/deployment/01-vm-docker.md`](docs/deployment/01-vm-docker.md).** That is
+the single source of truth for this path; the paragraphs below are orientation
+only and deliberately do not restate it.
+
 Or download the versioned Community bundle from the matching GitHub release:
 
 - Linux: `tinymrp-community-vX.Y.Z.tar.gz`, then run `./install.sh`.
@@ -439,14 +445,14 @@ default URL is `http://localhost:5000`; LAN exposure is an explicit choice and
 domain/TLS mode is an optional Caddy profile. Nextcloud is not included.
 
 Use the bundled `tinymrp.sh` or `tinymrp.ps1` for start, stop, status, logs,
-version-pinned update with rollback, verified backup/restore, and uninstall
-that preserves data by default. Do not install with a remote `curl | sh` or
-`irm | iex` pipeline, and do not configure an installed system with the
-mutable `latest` tag.
+`reconfigure` (change address, port or access mode without hand-editing
+`.env`), version-pinned update with rollback, verified backup/restore, and
+uninstall that preserves data by default. Do not install with a remote
+`curl | sh` or `irm | iex` pipeline, and do not configure an installed system
+with the mutable `latest` tag.
 
-The exact public path, lifecycle guarantees, and current host acceptance
-status are documented in [`deploy/community/README.md`](deploy/community/README.md)
-and [`deploy/community/ACCEPTANCE.md`](deploy/community/ACCEPTANCE.md).
+Lifecycle guarantees and current host acceptance status are in
+[`deploy/community/ACCEPTANCE.md`](deploy/community/ACCEPTANCE.md).
 
 ## Developer Docker Compose
 

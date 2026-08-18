@@ -157,7 +157,10 @@ exact version. A clone does not, which is why Option A needs `--build`.
 | --- | --- | --- | --- | --- |
 | `localhost` | `127.0.0.1` only | `http://localhost:5000` | none | Evaluating on the machine itself |
 | `lan` | `0.0.0.0` | `http://192.168.1.50:5000` | none | An office/workshop network you trust |
-| `domain` | Caddy owns 80/443 | `https://tinymrp.example.com` | automatic Let's Encrypt | Anything reachable from the internet |
+| `domain` | Caddy owns 80/443 | `https://mrp.example.com` | automatic, see below | Users type a name rather than an IP |
+
+The installer prints this same summary before it asks, so you do not have to
+memorise it.
 
 `lan` mode sends passwords and session cookies over the network **in clear
 text**. That is a deliberate, supported choice for a private network, and the
@@ -165,9 +168,37 @@ app logs a warning about it on every start. It is not acceptable for anything
 internet-facing. To keep a LAN deployment but add TLS, see
 [Adding HTTPS to a LAN deployment](08-networking-and-tls.md#adding-https-to-a-lan-deployment).
 
-`domain` mode needs a public DNS `A` record pointing at this host **before you
-run the installer**, plus inbound 80 and 443 — Let's Encrypt validates over
-port 80.
+### The port question, answered once
+
+The installer asks for a port in every mode, but it means different things:
+
+- `localhost` and `lan`: the port users actually type, as in
+  `http://192.168.1.50:5000`. Keep 5000 unless it is taken.
+- `domain`: **not** the port users type. They reach 443 implicitly through
+  `https://`. The port asked for here is a loopback-only port on the server,
+  used to reach the app directly when diagnosing something behind the proxy.
+  Press Enter to accept 5000. Do **not** answer 443 — that is Caddy's.
+
+### Two kinds of domain
+
+`domain` mode behaves differently depending on whether the name is one a public
+certificate authority can issue for. The installer detects this and tells you
+which one you are getting.
+
+| | Public name (`mrp.example.com`) | Internal-only name (`mrp.company.local`) |
+| --- | --- | --- |
+| Certificate from | Let's Encrypt, automatically | Caddy's own authority, automatically |
+| Needs public DNS | Yes, **before** you run the installer | No — internal DNS or a hosts file is enough |
+| Needs inbound 80 from the internet | Yes, Let's Encrypt validates over it | No |
+| Browser trust | Immediate | **Not until you install the root certificate** on every client |
+
+Internal-only means any name ending in `.local`, `.localdomain`, `.internal`,
+`.intranet`, `.lan`, `.test`, `.invalid`, `.home.arpa`, or a bare hostname with
+no dots. `mrp.mycompany.local` is internal. `mrp.mycompany.com` is public.
+
+Neither option is a downgrade: both give you real HTTPS. The internal one just
+needs one extra step, described in
+[Trusting an internal certificate](#trusting-an-internal-certificate) below.
 
 ---
 
@@ -188,15 +219,32 @@ From a release bundle:
 Drop `--with-demo-data` if you are loading real data straight away; it creates
 real demo logins.
 
-The installer asks four things:
+The installer asks four things. A LAN install looks like this:
 
 ```
 Deliverables folder [/home/you/TinyMRP/Deliverables]: /srv/tinymrp/deliverables
 Access mode (localhost/lan/domain) [localhost]: lan
-TinyMRP localhost port [5000]: 5000
+TinyMRP port [5000]: 5000
 LAN hostname or IP shown to users [192.168.1.50]: 192.168.1.50
 Administrator email [admin@example.com]: admin@yourcompany.com
 Administrator password (14+ characters): ********************
+```
+
+An internal-domain install looks like this. Note that the port is the loopback
+diagnostic port, not 443, and that the installer says up front what kind of
+certificate you are getting:
+
+```
+Deliverables folder [/home/you/TinyMRP/Deliverables]: /srv/tinymrp/deliverables
+Access mode (localhost/lan/domain) [localhost]: domain
+Internal loopback port for diagnostics [5000]: 5000
+Administrator email [admin@example.com]: daniel@yourcompany.com
+Administrator password (14+ characters): ********************
+Domain users will type (DNS or hosts file must point here) [tinymrp.example.com]: mrp.mycompany.local
+
+NOTE: mrp.mycompany.local is an internal-only name, so no public certificate
+authority can issue for it. Caddy will generate its own certificate instead.
+...
 ```
 
 Then it:
@@ -407,6 +455,7 @@ All from `deploy/community/` (or the extracted bundle):
 ./tinymrp.sh logs 1000                    # follow the last 1000
 ./tinymrp.sh stop                         # stop; data is untouched
 ./tinymrp.sh start                        # start again
+./tinymrp.sh reconfigure                  # change address, port or access mode
 ./tinymrp.sh backup                       # verified Mongo dump + config
 ./tinymrp.sh backup --include-deliverables
 ./tinymrp.sh restore backups/2026-08-14T02-00-00Z
@@ -434,29 +483,65 @@ More detail in [10 — Backups, updates and uninstall](10-operations.md).
 
 ## Customising the deployment
 
-### Changing the address or port after installation
+### Trusting an internal certificate
+
+Only needed when your domain is an internal-only name such as
+`mrp.mycompany.local`. Caddy signs it with an authority it generates on first
+start, so the encryption is real but no client trusts the signer yet. Until you
+do this, browsers show *"your connection is not private"* and the SolidWorks
+add-in refuses to connect.
+
+Export the root certificate once, from the server:
 
 ```bash
 cd deploy/community
-./tinymrp.sh stop
-# edit .env: APP_PORT, TINYMRP_URL, TINYMRP_ALLOWED_ORIGINS must all agree
-nano .env
-./tinymrp.sh start
+docker compose --env-file .env -f compose.yaml \
+  cp caddy:/data/caddy/pki/authorities/local/root.crt ./tinymrp-root-ca.crt
 ```
 
-Changing `APP_PORT` without changing `TINYMRP_URL` produces the login loop
-described in [07 — Troubleshooting](07-troubleshooting.md#i-log-in-and-land-back-on-the-login-page).
+Then install `tinymrp-root-ca.crt` as a trusted root on every machine that
+opens TinyMRP or runs the add-in:
 
-### Moving from `lan` to `domain`
+| Client | Command |
+| --- | --- |
+| Windows | `certutil -addstore -f Root tinymrp-root-ca.crt` (as Administrator) |
+| Ubuntu / Debian | `sudo cp tinymrp-root-ca.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates` |
+| macOS | `sudo security add-trusted-cert -d -k /Library/Keychains/System.keychain tinymrp-root-ca.crt` |
+| Firefox | Settings → Privacy & Security → Certificates → View Certificates → Authorities → Import |
 
-1. Point a public DNS `A` record at the host and wait for it to resolve.
-2. Stop the stack: `./tinymrp.sh stop`.
-3. In `.env` set `ACCESS_MODE="domain"`, `APP_BIND_IP="127.0.0.1"`,
-   `TINYMRP_DOMAIN="tinymrp.example.com"`, `ACME_EMAIL="you@example.com"`,
-   `TINYMRP_URL="https://tinymrp.example.com"`,
-   `TINYMRP_ALLOWED_ORIGINS="https://tinymrp.example.com"`, and
-   `TINYMRP_TRUSTED_PROXY_HOPS="1"`.
-4. `docker compose --env-file .env -f compose.yaml --profile domain up -d --wait`
+Firefox keeps its own trust store and ignores the system one, so it needs the
+import even on a machine where the system trust is already done.
+
+Each client must also resolve the name to the server. Either add the record to
+your internal DNS, or add a hosts-file line on each machine:
+
+```
+192.168.1.50   mrp.mycompany.local
+```
+
+The certificate is valid for ten years and survives restarts and updates,
+because it lives in the `caddy_data` volume. It is regenerated only if you
+delete that volume (`./tinymrp.sh uninstall --delete-data`), which would mean
+redistributing the new root certificate.
+
+### Changing the address, port or access mode after installation
+
+Do not hand-edit `.env`. Eight keys describe this one decision — `ACCESS_MODE`,
+`APP_BIND_IP`, `APP_PORT`, `TINYMRP_URL`, `TINYMRP_TRUSTED_PROXY_HOPS`,
+`TINYMRP_ALLOWED_ORIGINS`, `TINYMRP_DOMAIN` and `ACME_EMAIL` — and when they
+disagree the symptom is not an error but a silent login loop. Use:
+
+```bash
+cd deploy/community
+./tinymrp.sh reconfigure
+```
+
+It asks the same three questions the installer asked, defaulting to what you
+have now, derives all eight keys, restarts what needs restarting, and waits for
+the app to report healthy before telling you it worked. Mongo and Redis are not
+touched, so no data moves. Moving between `lan` and `domain` is the same
+command — it adds or removes the Caddy proxy for you, and prints the
+certificate-trust steps again if the new domain is internal-only.
 
 ### Tuning worker count and memory
 
@@ -582,12 +667,16 @@ docker compose --env-file .env -f compose.yaml logs --tail 100 app
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| Login succeeds then returns to the login page | `TINYMRP_URL` scheme does not match how you are reaching the site | See [07 — Troubleshooting](07-troubleshooting.md#i-log-in-and-land-back-on-the-login-page) |
+| Login succeeds then returns to the login page | `TINYMRP_URL` scheme does not match how you are reaching the site | `./tinymrp.sh reconfigure`; background in [07 — Troubleshooting](07-troubleshooting.md#i-log-in-and-land-back-on-the-login-page) |
+| `No such image: mongo:6.0@sha256:...` | Installers before 2026-08-18 passed `--pull never` after `--build`, which blocked Mongo, Redis and Caddy from being pulled too | `git pull` and re-run. On an older checkout: `docker compose --env-file .env -f compose.yaml --profile domain pull mongo redis caddy` first |
+| `exec /usr/bin/caddy: operation not permitted` | Compose files before 2026-08-18 dropped every capability from Caddy, including the `cap_net_bind_service` its binary carries | `git pull` and re-run. Domain mode cannot start without it |
+| Installer says "ready" but `https://<domain>` never answers | Same Caddy fault: it had no healthcheck, so `--wait` accepted a crash-looping container | `./tinymrp.sh status` — Caddy must say `healthy`, not `Restarting` |
+| Browser warns "your connection is not private" | Internal-only domain, so Caddy signed it itself | [Trusting an internal certificate](#trusting-an-internal-certificate) |
 | `WARNING: ... is not owned by uid 1000 and is not empty` | Existing deliverables folder | `sudo chown -R 1000:1000 /srv/tinymrp/deliverables` |
 | `ERROR: deliverables root ... is NOT writable` | Same, or a read-only mount | As above; check the mount options |
 | `Set an explicit semantic TINYMRP_VERSION` | Clone without `release.env` | Add `--build` |
 | `TCP port 5000 is already in use` | Something else has it | `sudo ss -ltnp | grep :5000`, then pick another port |
-| `.env already exists` | Previous installation | Use `./tinymrp.sh`, or move `.env` aside to start over |
+| `.env already exists` | Previous installation | `./tinymrp.sh reconfigure` to change settings; `./tinymrp.sh status` to inspect |
 | App container restarts forever | Mongo credentials mismatched against an existing volume | `docker compose ... logs mongo`; a mid-life credential change needs [UPDATING_PRODUCTION.md](../UPDATING_PRODUCTION.md) |
 | Reachable locally, not from another PC | Host firewall, or `localhost` mode | [Step 6](#step-6--open-the-firewall); check `APP_BIND_IP` is `0.0.0.0` |
 

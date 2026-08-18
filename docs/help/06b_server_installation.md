@@ -1,409 +1,79 @@
-# Installation
+# Installing and running the server
 
-This page covers first deployment, safe updates, and operating basics for TinyMRP v2.
+**The deployment guides in `docs/deployment/` are the single source of truth for
+installing TinyMRP.** They are written to be read on GitHub before you have a
+server, they are the pages the installers themselves refer to, and they are the
+only place install steps are maintained. This page does not repeat them — it
+tells you which one to open, and then gives you the two tables that are
+generated from the code and so cannot be kept anywhere else.
 
-## Full deployment guides
+If someone sent you here to install a server, the page you want is almost
+certainly **`docs/deployment/01-vm-docker.md`**.
 
-Step-by-step guides for every deployment option live in `docs/deployment/` in
-the repository, and can be read on GitHub before you have a server:
+## Which guide
 
-| Guide | Covers |
+| You have | Open |
 | --- | --- |
-| `docs/deployment/README.md` | Which path to choose, and the three settings TinyMRP actually needs |
-| `docs/deployment/01-vm-docker.md` | A VM or server with Docker — the recommended single-instance path |
-| `docs/deployment/02-linux-bare-metal.md` | systemd + gunicorn + nginx, no Docker |
-| `docs/deployment/03-windows-lan.md` | Windows on an office LAN |
-| `docs/deployment/04-vps-multi-instance.md` | The guided Caddy multi-instance VPS path below, in detail |
-| `docs/deployment/05-configuration-reference.md` | Every environment variable |
-| `docs/deployment/06-first-run.md` | Administrator, roles, and the evaluation dataset |
-| `docs/deployment/07-troubleshooting.md` | Symptom-first fixes |
-| `docs/deployment/08-networking-and-tls.md` | Addresses, firewalls, and adding HTTPS to a LAN |
-| `docs/deployment/10-operations.md` | Backups, updates, uninstall |
+| **A Linux VM or server with Docker — the recommended path** | **`docs/deployment/01-vm-docker.md`** |
+| Windows with Docker Desktop | `docs/deployment/01-vm-docker.md`, "Windows Docker Desktop" section |
+| A Linux server where Docker is not permitted | `docs/deployment/02-linux-bare-metal.md` |
+| A Windows machine on an office LAN | `docs/deployment/03-windows-lan.md` |
+| A locked-down Windows host where only `python run.py` is approved | `docs/deployment/12-restricted-windows-flask.md` |
+| A public VPS hosting several companies | `docs/deployment/04-vps-multi-instance.md` |
+| A developer machine | `docs/deployment/09-local-development.md` |
 
-**One setting decides whether a deployment works at all: `TINYMRP_URL`.** It is
-the address users type, scheme included. Its scheme determines whether session
-cookies are marked `Secure` and whether the page asks browsers to upgrade
-assets to HTTPS. Declaring `https://` on a plain-HTTP LAN deployment makes every
-login bounce back to the login form.
+Each guide is self-contained: prerequisites, the install command, what every
+question means, first login, day-to-day operation, and the failures specific to
+that path. You should not need to read two of them.
 
-## Deployment Options
+## Then, whichever path you took
 
-### Recommended: Guided Ubuntu deployment
+| Question | Page |
+| --- | --- |
+| What does this environment variable do? | `docs/deployment/05-configuration-reference.md` |
+| How do I log in, seed roles, load the sample dataset? | `docs/deployment/06-first-run.md` |
+| Something is broken | `docs/deployment/07-troubleshooting.md` |
+| Addresses, firewalls, TLS, adding HTTPS to a LAN | `docs/deployment/08-networking-and-tls.md` |
+| Backups, updates, uninstall | `docs/deployment/10-operations.md` |
+| The question people actually ask | `docs/deployment/11-faq.md` |
 
-Use the guided Linux deployment scripts for production and pilot environments. This path uses:
+## The recommended path in brief
 
-- Docker for the app containers
-- Caddy as the public reverse proxy
-- automatic HTTPS certificate management
-- private MongoDB containers
-- built-in DNS guidance and DNS validation
-- TinyMRP app file serving for protected deliverables by default
-
-Main guide:
-
-- `deploy/README.md`
-
-Main commands:
+On a Linux VM with Docker, from a clone:
 
 ```bash
-sudo ./deploy/scripts/install-host.sh --base-domain tinymrp.com
-sudo ./deploy/scripts/create-instance.sh company1 company1.tinymrp.com
-sudo ./deploy/scripts/install-nextcloud-instance.sh company1 cloud.company1.tinymrp.com
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --read-only --non-interactive
-sudo ./deploy/scripts/doctor.sh
+./deploy/community/install.sh --build
 ```
 
-Operational update commands:
+Add `--with-demo-data` to load the CV03 sample dataset and one login per role
+for evaluation; leave it off for an instance that will hold real data.
+
+It asks for a deliverables folder, an access mode with its address, and the
+first administrator, and generates every secret itself. Afterwards:
 
 ```bash
-sudo ./deploy/scripts/update-repo.sh
-sudo ./deploy/scripts/update-instance.sh company1
-sudo ./deploy/scripts/update-all-instances.sh
-sudo ./deploy/scripts/rollback-instance.sh company1
+./deploy/community/tinymrp.sh status|logs|reconfigure|backup|restore|update|uninstall
 ```
 
-### Single VM or server with Docker
+`reconfigure` is how you change the address, port or access mode later. Do not
+hand-edit `.env`: eight keys have to agree, and when they disagree the symptom
+is a silent login loop rather than an error.
 
-The simplest supported deployment, and the one to use for a container in a VM.
-It runs TinyMRP, MongoDB and Redis and nothing else — no Nextcloud, no
-multi-instance machinery.
+The one setting that decides whether a deployment works at all is
+`TINYMRP_URL` — the address users type, **scheme included**. Its scheme is what
+tells the app whether to mark session cookies `Secure`. Declaring `https://` on
+a plain-HTTP deployment makes every login bounce back to the login form.
+`reconfigure` derives it for you, which is the reason it exists.
 
-```bash
-./deploy/community/install.sh --build --with-demo-data
-```
+## Every deployment script and its options
 
-It asks for a deliverables folder, an access mode (`localhost`, `lan` or
-`domain`) with its address, and the first administrator; it generates every
-secret itself. Full guide: `docs/deployment/01-vm-docker.md`.
+Generated from the scripts themselves, so it cannot drift from what they
+actually accept. Run any of them with `--help` or `Get-Help` for full detail.
 
-### Hardened Windows LAN-Only (No Docker)
+{{AUTO_DEPLOY_SCRIPTS}}
 
-Use this when IT requires a Windows workstation deployment with internal-only access.
+## Every configuration variable
 
-- Guide: `docs/deployment/03-windows-lan.md` (or the condensed
-  `deploy/windows/README.md`)
-- IT ticket template: `deploy/windows/IT_REQUEST_TEMPLATE.md`
-- Hardened env template: `deploy/windows/.env.windows.lan.example`
+Collected from the shipped `.env*.example` templates.
 
-### Advanced: Local developer runtime
-
-Use direct Python and Node only for development and debugging.
-Guide: `docs/deployment/09-local-development.md`.
-
-## Prerequisites
-
-- Ubuntu host with internet access on ports `80` and `443`.
-- A domain or subdomain you can point to the server.
-- Access to edit DNS records at your DNS provider.
-- `sudo` access on the host.
-
-## First-Time Setup (Guided Ubuntu)
-
-### 1) Install host services
-
-```bash
-sudo ./deploy/scripts/install-host.sh --base-domain tinymrp.com
-```
-
-This stores host config in `/srv/tinymrp/host/.env` and starts the shared Caddy reverse proxy.
-
-### 2) Create an instance
-
-```bash
-sudo ./deploy/scripts/create-instance.sh company1 company1.tinymrp.com
-```
-
-The script:
-
-- detects the public IP
-- prints the exact DNS record to create
-- waits for DNS to resolve correctly
-- creates the app and private MongoDB containers
-- creates the Caddy route
-- enables HTTPS automatically for public domains
-
-The installer generates the first administrator credentials before Docker is
-started and shows them once in the invoking terminal. The app container does not
-generate or log passwords. Existing users and password hashes are not changed on
-restart or update. If an empty database is missing valid bootstrap credentials,
-the app stays unhealthy and the guided deployment reports the failure.
-
-Generated file-serving defaults for guided Caddy deployments:
-
-- `FILES_LOCAL_ROOT="/data/deliverables"`
-- `FILES_URL_PREFIX="/deliverables"`
-- `FILES_PUBLIC_URLS="false"`
-- `FILES_ACCEL_REDIRECT_PREFIX=""`
-
-Keep the deliverables bind mount at `/srv/tinymrp/instances/<instance>/deliverables:/data/deliverables`. Do not set `FILES_ACCEL_REDIRECT_PREFIX="/__files"` for Caddy unless you explicitly implement and validate a Caddy-compatible protected static offload flow.
-
-### 3) Open TinyMRP
-
-- URL: `https://company1.tinymrp.com`
-- Login with the generated canonical administrator account from the installer output.
-
-## DNS And Domain Setup
-
-Examples:
-
-- `company1.tinymrp.com` -> `A company1 <server-ip>`
-- `tinymrp.customercompany.com` -> `A tinymrp <server-ip>`
-- `customercompany.com` -> `A @ <server-ip>`
-- `cloud.tinymrp.com` -> `A cloud <server-ip>`
-
-If the host has IPv6, the scripts also print an optional `AAAA` record.
-
-## Nextcloud
-
-The recommended multi-company path is one independent Nextcloud per TinyMRP company instance:
-
-```bash
-sudo ./deploy/scripts/install-nextcloud-instance.sh company1 cloud.company1.tinymrp.com
-sudo ./deploy/scripts/install-nextcloud-instance.sh company2 cloud.company2.tinymrp.com
-```
-
-Then link one or more TinyMRP instances without editing Compose or running `occ` commands by hand:
-
-```bash
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1
-sudo ./deploy/scripts/link-nextcloud-instance.sh company2 --read-only --non-interactive
-```
-
-This keeps TinyMRP as the storage owner. Deliverables stay under `/srv/tinymrp/instances/<instance>/deliverables`, each company Nextcloud lives under `/srv/tinymrp/nextcloud/<instance>/`, the link script writes a managed `compose.tinymrp-deliverables.override.yml` inside that Nextcloud root, and the default Caddy deployment keeps `FILES_ACCEL_REDIRECT_PREFIX=""`.
-
-The link flow now also handles Nextcloud external-storage rescans for server-side TinyMRP file changes:
-
-- it runs an immediate scan after linking
-- it installs a recurring scan job by default
-- it refreshes both the external-storage cache and the user-visible mount paths
-- this keeps TinyMRP import and upload-pack files visible to Nextcloud desktop clients without a manual `occ` scan
-
-The link script now asks which mode to use unless you pass a flag:
-
-- Read-only is the default and safest option. Nextcloud can view, download, and share deliverables, but cannot change them.
-- Bidirectional mode is needed for trusted Windows or Mac Nextcloud desktop-client workflows that must upload or sync files back into the VPS deliverables folder.
-- Bidirectional mode is higher risk because Nextcloud users can modify or delete TinyMRP deliverables.
-
-Recommended default:
-
-- use read-only for customer sharing and downloads
-- use bidirectional only for trusted internal sync workflows
-
-Examples:
-
-```bash
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1
-sudo ./deploy/scripts/scan-nextcloud-instance.sh company1
-sudo ./deploy/scripts/install-nextcloud-scan-job.sh company1 --interval-minutes 5
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --read-only
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --bidirectional
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --read-only
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --bidirectional
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --scan-now-only --read-only --non-interactive
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --nextcloud-instance global --read-only --non-interactive
-```
-
-`--non-interactive` requires either `--read-only` or `--bidirectional`.
-
-Legacy shared/global Nextcloud is still available through `install-nextcloud.sh`, but it is not the recommended path for multi-company deployments and it is not re-domained automatically. If you intentionally keep using it, target it with `--nextcloud-instance global`.
-
-Server-side Nextcloud sync smoke test:
-
-1. Create the test folder and file on the host:
-   `sudo install -d /srv/tinymrp/instances/<instance>/deliverables/nextcloud-server-side-sync-test`
-   `printf 'server-side sync test\n' | sudo tee /srv/tinymrp/instances/<instance>/deliverables/nextcloud-server-side-sync-test/server-created.txt >/dev/null`
-2. Run `sudo ./deploy/scripts/scan-nextcloud-instance.sh <instance> --nextcloud-instance <selector>`.
-3. Confirm the scan output includes `PASS: User path scan completed for <user>/files/TinyMRP - <instance> Deliverables`.
-4. Verify the file appears in the Nextcloud web UI inside `TinyMRP - <instance> Deliverables/nextcloud-server-side-sync-test/server-created.txt`.
-5. If a desktop client is connected, verify it downloads the file after the scan job runs or immediately after the manual scan completes.
-
-## Updating And Rollback
-
-Repository update:
-
-```bash
-cd /opt/TinyMRP-v2
-sudo ./deploy/scripts/update-repo.sh
-```
-
-Per-instance update:
-
-```bash
-sudo ./deploy/scripts/update-instance.sh company1
-```
-
-Batch update:
-
-```bash
-sudo ./deploy/scripts/update-all-instances.sh
-```
-
-Rollback:
-
-```bash
-sudo ./deploy/scripts/rollback-instance.sh company1
-```
-
-Per-instance update metadata lives under `/srv/tinymrp/instances/<instance>/updates/`.
-
-Backed up automatically before each update:
-
-- `.env`
-- `compose.yml`
-- current update state
-- the instance Caddy route file if present
-
-Not touched by the normal update flow:
-
-- MongoDB data
-- deliverables
-- generated secrets
-
-If a release requires a migration, stop after `update-repo.sh`, take a manual MongoDB backup, update one pilot instance first, and only then continue with the rest of the fleet.
-
-To pin one instance to an older tested build:
-
-```bash
-sudo ./deploy/scripts/update-instance.sh company1 --image tinymrp-app:abc123def456 --git-commit 0123456789abcdef
-```
-
-## Deliverables Smoke Test
-
-After importing a small Upload Pack with files under `deliverables/png` and `deliverables/pdf`, verify:
-
-1. Files exist on the host under `/srv/tinymrp/instances/<instance>/deliverables`.
-2. The app container sees them under `/data/deliverables`.
-3. TinyMRP can display or download them through the normal `/deliverables` route.
-4. The default Caddy deployment is not relying on a `"/__files"` redirect.
-
-## Recover A Broken Caddy Instance
-
-If an existing Caddy deployment still has `FILES_ACCEL_REDIRECT_PREFIX="/__files"`, run:
-
-```bash
-cd /srv/tinymrp/instances/<instance>
-sudo cp .env ".env.bak.$(date +%Y%m%d-%H%M%S)"
-sudo sed -i 's#^FILES_ACCEL_REDIRECT_PREFIX=.*#FILES_ACCEL_REDIRECT_PREFIX=""#' .env
-sudo docker compose up -d --force-recreate
-```
-
-## Local VM Mode
-
-For local-only testing:
-
-```bash
-sudo ./deploy/scripts/install-host.sh --local-mode http
-sudo ./deploy/scripts/create-instance.sh demo demo.test.local --local-mode http
-```
-
-Local domains such as `demo.test.local` and `demo.localhost` do not use public Let's Encrypt certificates.
-
-`--local-mode http` serves the instance over plain HTTP and writes
-`TINYMRP_URL=http://<domain>` into the instance `.env`. That is what keeps the
-session cookie storable on a plain-HTTP origin and stops the page asking
-browsers to upgrade its assets to TLS. `--local-mode internal-tls` uses Caddy's
-internal CA instead and writes an `https://` URL; every client must then trust
-that CA.
-
-## Authentication on guided Caddy instances
-
-There is one security model. Every new instance gets an exact allowed origin
-and strong generated secrets. Caddy remains the TLS endpoint and forwards the
-host and scheme the browser used. Normal browser pages and APIs use the signed
-session; unsafe browser API requests must carry a same-origin Origin or
-Referer. The SolidWorks add-in and other integrations use API bearer tokens.
-Public part shares remain limited to their opaque share URL, and `/api/health`
-stays anonymous for Caddy and Docker health checks.
-
-The old compat mode and its second set of CORS, CSRF, cookie and upload rules
-were removed, along with `TINYMRP_SECURITY_MODE`. Nothing needs migrating: the
-strict path is now the only path.
-
-## Windows LAN-Only Setup (No Docker)
-
-Use this path for service-based Windows deployment with NGINX reverse proxy + Waitress.
-
-1. Follow `deploy/windows/README.md` step-by-step.
-2. Keep Flask app private on `127.0.0.1:8000`.
-3. Keep MongoDB private on `127.0.0.1:27017` (or separate internal DB server).
-4. Expose only NGINX HTTP (`80`) to allowed LAN ranges.
-
-Compatibility note (as of 2026-02-24):
-
-- Windows 10 support ended on 2025-10-14.
-- MongoDB current Windows support tables list Windows 11 / Windows Server variants for modern releases.
-- NGINX on Windows has known limitations and does not run as a native Windows service without a wrapper.
-- If host OS must stay Windows 10, prefer running MongoDB on a separate supported host and point `MONGO_URI` there.
-
-## File Storage Rules
-
-TinyMRP matches files by part number and revision. Standard groups include:
-
-- `pdf`, `dxf`, `step`, `edr`, `3mf`, `ply`, `stl`, `png`, `datasheet`
-
-Expected naming pattern:
-
-- `PARTNUMBER_REV_REVISION.ext`
-- Drawing preview PNG commonly appears as `*_DWG.png`.
-
-If revision is blank, empty revision tokens are allowed and should be treated as valid.
-
-## Upload Pack Limits
-
-Global defaults can be controlled by env and admin settings:
-
-- Max ZIP size
-- Max single file size
-- Max files per ZIP
-
-These limits are enforced during `/api/upload/pack` processing.
-
-## Local Development (Advanced)
-
-1. Install Python dependencies: `pip install -r requirements.txt`
-2. Install frontend dependencies in `frontend/`: `npm install`
-3. Run backend (`python run.py`) and build frontend (`npm run build` or `npm run dev`)
-
-## Upgrade Procedure
-
-1. Pull latest code.
-2. Rebuild and restart containers:
-
-```powershell
-docker compose up -d --build
-```
-
-3. Re-run `seed-roles` only if role definitions were intentionally updated by release notes.
-4. Validate critical pages:
-  - `/ui/parts`
-  - `/ui/part/<pn>`
-  - `/ui/upload-pack`
-  - `/admin/jobs/`
-  - `/admin/orders/`
-
-## Backup Recommendations
-
-- Database backup (MongoDB dump/snapshot).
-- Deliverables file root backup.
-- `instance/` backup if used for runtime files.
-- Branding and app settings backup.
-
-## Security Baseline
-
-- Keep `SECRET_KEY` and `SECURITY_PASSWORD_SALT` strong and private.
-- Run HTTPS in production.
-- Keep `FILES_PUBLIC_URLS` disabled unless you explicitly need public file links.
-- Use roles and permissions instead of code edits for access control.
-
-## Help Build Command
-
-After updating help markdown:
-
-```powershell
-flask --app run.py help build
-```
-
-This regenerates:
-
-- `app/static/help/help.html`
-- `app/static/help/help_toc.json`
+{{AUTO_ENV_VARS}}

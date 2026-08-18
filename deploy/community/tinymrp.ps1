@@ -5,7 +5,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('start', 'stop', 'status', 'logs', 'update', 'backup', 'restore', 'uninstall')]
+    [ValidateSet('start', 'stop', 'status', 'logs', 'reconfigure', 'update', 'backup', 'restore', 'uninstall')]
     [string]$Command,
     [Parameter(Position = 1)]
     [string]$Argument,
@@ -123,6 +123,110 @@ function Start-Stack {
         Invoke-Compose --profile domain up -d --wait
     } else {
         Invoke-Compose up -d --wait
+    }
+}
+
+function Read-Default([string]$Prompt, [string]$Default) {
+    $value = Read-Host "$Prompt [$Default]"
+    if ([string]::IsNullOrWhiteSpace($value)) { return $Default }
+    return $value.Trim()
+}
+
+function Test-Port([int]$Number) {
+    return $null -ne (Get-NetTCPConnection -State Listen -LocalPort $Number -ErrorAction SilentlyContinue | Select-Object -First 1)
+}
+
+# Kept in step with is_internal_domain() in install.sh / tinymrp.sh.
+function Test-InternalDomain([string]$Domain) {
+    $d = $Domain.ToLowerInvariant()
+    foreach ($suffix in @('.local', '.localdomain', '.localhost', '.internal', '.intranet',
+                          '.lan', '.home.arpa', '.test', '.invalid', '.example',
+                          '.example.com', '.example.org', '.example.net')) {
+        if ($d.EndsWith($suffix)) { return $true }
+    }
+    return (-not $d.Contains('.'))
+}
+
+# Eight keys in .env describe one decision: how browsers reach this server.
+# They have to agree, and the failure when they do not is a silent login loop
+# rather than an error. Editing .env by hand means getting all eight right by
+# hand; this asks the three questions the installer asked and derives the rest.
+function Invoke-Reconfigure {
+    $oldMode = Get-EnvValue 'ACCESS_MODE'; if (-not $oldMode) { $oldMode = 'localhost' }
+    $oldPort = Get-EnvValue 'APP_PORT'; if (-not $oldPort) { $oldPort = '5000' }
+    Write-Host "Current address: $(Get-EnvValue 'TINYMRP_URL') (access mode: $oldMode)"
+    Write-Host @'
+
+  localhost  only this machine, http://localhost:<port>
+  lan        any machine on the network, http://<ip-or-name>:<port>, plain HTTP
+  domain     https://<domain> with TLS terminated by Caddy; needs 80 and 443
+
+'@
+    $mode = Read-Default 'Access mode (localhost/lan/domain)' $oldMode
+    if ($mode -notin @('localhost', 'lan', 'domain')) { Stop-WithError 'Access mode must be localhost, lan, or domain.' }
+
+    $bindIp = '127.0.0.1'; $domain = ''; $acmeEmail = ''; $proxyHops = 0
+    if ($mode -eq 'domain') {
+        $newPort = Read-Default 'Internal loopback port for diagnostics (users reach 443)' $oldPort
+    } else {
+        $newPort = Read-Default 'TinyMRP port' $oldPort
+    }
+    $parsedPort = 0
+    if (-not [int]::TryParse($newPort, [ref]$parsedPort) -or $parsedPort -lt 1 -or $parsedPort -gt 65535) {
+        Stop-WithError 'Port must be between 1 and 65535.'
+    }
+
+    switch ($mode) {
+        'localhost' { $origin = "http://localhost:$parsedPort" }
+        'lan' {
+            $bindIp = '0.0.0.0'
+            $detected = Get-NetIPAddress -AddressFamily IPv4 -PrefixOrigin Dhcp -ErrorAction SilentlyContinue |
+                Where-Object { $_.IPAddress -notlike '169.254.*' } | Select-Object -ExpandProperty IPAddress -First 1
+            $lanHost = Read-Default 'LAN hostname or IP shown to users' $(if ($detected) { $detected } else { '192.168.1.10' })
+            if (-not $lanHost) { Stop-WithError 'A LAN hostname or IP is required.' }
+            $origin = "http://${lanHost}:$parsedPort"
+        }
+        'domain' {
+            $domain = Read-Default 'Domain users will type' (Get-EnvValue 'TINYMRP_DOMAIN')
+            if (-not $domain) { Stop-WithError 'A domain is required in domain mode.' }
+            $acmeEmail = Read-Default 'Email for certificate notices' (Get-EnvValue 'ACME_EMAIL')
+            $origin = "https://$domain"; $proxyHops = 1
+        }
+    }
+    $url = $origin
+
+    Write-Host "`nNew address will be: $url"
+    if ((Read-Default 'Apply and restart? (yes/no)' 'yes') -ne 'yes') { Stop-WithError 'Nothing was changed.' }
+
+    if ($mode -eq 'domain' -and $oldMode -ne 'domain') {
+        if ((Test-Port 80) -or (Test-Port 443)) { Stop-WithError 'Domain mode requires free TCP ports 80 and 443. Nothing was changed.' }
+    }
+    # Stop only what has to stop. Leaving domain mode has to remove Caddy; the
+    # database has no reason to bounce because an address changed.
+    if ($mode -ne 'domain' -and $oldMode -eq 'domain') {
+        try { Invoke-Compose --profile domain rm -sf caddy | Out-Null } catch { }
+    }
+
+    Set-EnvValue 'ACCESS_MODE' $mode
+    Set-EnvValue 'APP_BIND_IP' $bindIp
+    Set-EnvValue 'APP_PORT' $parsedPort.ToString()
+    Set-EnvValue 'TINYMRP_URL' $url
+    Set-EnvValue 'TINYMRP_TRUSTED_PROXY_HOPS' $proxyHops.ToString()
+    Set-EnvValue 'TINYMRP_ALLOWED_ORIGINS' $origin
+    Set-EnvValue 'TINYMRP_DOMAIN' $domain
+    Set-EnvValue 'ACME_EMAIL' $acmeEmail
+
+    Start-Stack
+    if (-not (Wait-App)) { Stop-WithError "Reconfigured to $url but TinyMRP did not become healthy; see .\tinymrp.ps1 logs." }
+    Write-Host "`nTinyMRP is now at $url"
+    if ($mode -eq 'domain' -and (Test-InternalDomain $domain)) {
+        Write-Host "`n$domain is an internal-only name, so Caddy signs it with its own"
+        Write-Host 'authority. Export the root certificate and trust it on every client:'
+        Write-Host ''
+        Write-Host "  docker compose --env-file `"$EnvFile`" -f `"$ComposeFile`" ``"
+        Write-Host '    cp caddy:/data/caddy/pki/authorities/local/root.crt .\tinymrp-root-ca.crt'
+        Write-Host ''
+        Write-Host '  Windows  certutil -addstore -f Root tinymrp-root-ca.crt   (as Administrator)'
     }
 }
 
@@ -246,8 +350,99 @@ function Restore-Stack([string]$Source, [bool]$WithDeliverables, [bool]$Confirme
     Write-Host 'Restore verified; TinyMRP is healthy. config.env was retained as evidence and was not applied.'
 }
 
+# An install made with `install.ps1 -Build` runs an image that exists only on
+# this host, tagged <VERSION>-src.<sha>. There is nothing to pull, so the
+# registry path below cannot serve it.
+function Test-SourceInstall {
+    $repo = Get-EnvValue 'TINYMRP_IMAGE_REPOSITORY'
+    $version = Get-EnvValue 'TINYMRP_VERSION'
+    return ($repo -eq 'tinymrp-local' -or $version -like '*-src.*')
+}
+
+function Update-FromSource {
+    Assert-Installed; Assert-Runtime
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Stop-WithError 'git is required to update from source.' }
+    $repoRoot = (Resolve-Path -LiteralPath (Join-Path $ScriptDir '..\..') -ErrorAction SilentlyContinue).Path
+    $dockerfile = if ($repoRoot) { Join-Path $repoRoot 'docker\app\Dockerfile' } else { '' }
+    if (-not $repoRoot -or -not (Test-Path -LiteralPath $dockerfile)) {
+        Stop-WithError 'Source updates need a git checkout. This looks like an extracted release bundle, so use: .\tinymrp.ps1 update vMAJOR.MINOR.PATCH'
+    }
+    & git -C $repoRoot rev-parse --git-dir 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { Stop-WithError "$repoRoot is not a git repository, so there is nothing to pull." }
+
+    # A rebuild bakes the working tree into the image; doing that silently with
+    # uncommitted edits produces an image nobody can reproduce later.
+    $dirty = & git -C $repoRoot status --porcelain --untracked-files=no
+    if ($dirty) {
+        $dirty | ForEach-Object { Write-Host $_ }
+        Stop-WithError "Uncommitted changes in $repoRoot. Commit or stash them first, so the image you run matches a known commit."
+    }
+    $branch = (& git -C $repoRoot rev-parse --abbrev-ref HEAD).Trim()
+    if ($branch -eq 'HEAD') { Stop-WithError "The checkout is on a detached HEAD. Run: git -C $repoRoot checkout main" }
+    $upstream = (& git -C $repoRoot rev-parse --abbrev-ref '@{upstream}' 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $upstream) { Stop-WithError "Branch $branch has no upstream, so there is nothing to pull from." }
+
+    Write-Host "Fetching $upstream..."
+    & git -C $repoRoot fetch --quiet --prune
+    if ($LASTEXITCODE -ne 0) { Stop-WithError 'git fetch failed. Check network access to the remote.' }
+    & git -C $repoRoot merge --ff-only '@{upstream}' 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { Stop-WithError "$branch cannot be fast-forwarded to $upstream, so this checkout has diverged. Resolve it by hand: git -C $repoRoot status" }
+
+    $baseVersion = (Get-Content -LiteralPath (Join-Path $repoRoot 'VERSION') -Raw).Trim()
+    if (-not $baseVersion) { Stop-WithError "Could not read $repoRoot\VERSION." }
+    $sha = (& git -C $repoRoot rev-parse --short=7 HEAD).Trim()
+    $newVersion = "$baseVersion-src.$sha"
+    $old = Get-EnvValue 'TINYMRP_VERSION'
+    $imageRepository = Get-EnvValue 'TINYMRP_IMAGE_REPOSITORY'
+    if (-not $imageRepository) { $imageRepository = 'tinymrp-local' }
+
+    & docker image inspect "${imageRepository}:${newVersion}" 2>$null | Out-Null
+    if ($newVersion -eq $old -and $LASTEXITCODE -eq 0) {
+        Write-Host "Already up to date: $sha is the newest commit on $branch, and its image is built."
+        return
+    }
+
+    Write-Host "Updating from $old to $newVersion..."
+    Backup-Stack $false
+    $backup = Get-ChildItem -LiteralPath $BackupRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
+    Write-Host "Building ${imageRepository}:${newVersion} (several minutes; later builds reuse the cache)..."
+    Invoke-DockerCommand build -f $dockerfile -t "${imageRepository}:${newVersion}" $repoRoot
+
+    Set-EnvValue 'TINYMRP_VERSION' $newVersion
+    try {
+        Invoke-Compose up -d --no-deps --force-recreate app
+        if (-not (Wait-App)) { Stop-WithError 'Replacement app did not become healthy.' }
+        if ((Get-EnvValue 'ACCESS_MODE') -eq 'domain') { Start-Stack }
+        Write-Host "`nUpdated TinyMRP from $old to $newVersion."
+        Write-Host "Pre-update backup: $($backup.FullName)"
+        Write-Host "The previous image ${imageRepository}:${old} was kept, so a rollback needs no rebuild."
+    } catch {
+        Write-Warning "Update failed; rolling back to $old."
+        Set-EnvValue 'TINYMRP_VERSION' $old
+        Invoke-Compose up -d --no-deps --force-recreate app
+        if (-not (Wait-App)) { Stop-WithError "Automatic rollback also failed. Your data backup is $($backup.FullName)" }
+        Stop-WithError "Update to $newVersion failed; app rolled back to $old. Data backup is $($backup.FullName)"
+    }
+}
+
 function Update-Stack([string]$Target) {
     Assert-Installed; Assert-Runtime
+    if ($Target -eq '--from-source' -or $Target -eq '-FromSource') { Update-FromSource; return }
+    if (-not $Target) {
+        if (Test-SourceInstall) { Update-FromSource; return }
+        Stop-WithError @'
+Usage: .\tinymrp.ps1 update vMAJOR.MINOR.PATCH
+This instance runs a published release image, so an update needs the version to move to.
+An instance installed from a git checkout with -Build updates with no argument.
+'@
+    }
+    if (Test-SourceInstall) {
+        Stop-WithError @"
+This instance was installed from a git checkout (image $(Get-EnvValue 'TINYMRP_IMAGE_REPOSITORY'):$(Get-EnvValue 'TINYMRP_VERSION')).
+Its image exists only on this host and was never published, so there is no $Target to pull.
+Update it from source instead:  .\tinymrp.ps1 update
+"@
+    }
     if ($Target -notmatch '^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$') { Stop-WithError 'Usage: .\tinymrp.ps1 update vMAJOR.MINOR.PATCH' }
     $old = Get-EnvValue 'TINYMRP_VERSION'
     if ($Target -eq $old) { Stop-WithError "TinyMRP is already configured for $Target." }
@@ -274,6 +469,7 @@ switch ($Command) {
     'start' { Assert-Runtime; Start-Stack; Write-Host "TinyMRP started: $(Get-EnvValue 'TINYMRP_URL')" }
     'stop' { Assert-Runtime; Invoke-Compose --profile domain stop }
     'status' { Assert-Runtime; Invoke-Compose --profile domain ps }
+    'reconfigure' { Assert-Runtime; Invoke-Reconfigure }
     'logs' { Assert-Runtime; Invoke-Compose --profile domain logs --tail $(if ($Argument) { $Argument } else { '200' }) -f app mongo redis caddy }
     'backup' { Backup-Stack ([bool]$IncludeDeliverables) }
     'restore' { Restore-Stack $Argument ([bool]$IncludeDeliverables) ([bool]$Yes) }
@@ -289,5 +485,5 @@ switch ($Command) {
             Write-Host 'Application removed. Mongo data, configuration, backups, and deliverables were preserved.'
         }
     }
-    default { Stop-WithError 'Usage: .\tinymrp.ps1 {start|stop|status|logs|backup|restore|update|uninstall}' }
+    default { Stop-WithError 'Usage: .\tinymrp.ps1 {start|stop|status|logs|reconfigure|backup|restore|update|uninstall}' }
 }

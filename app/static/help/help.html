@@ -1879,659 +1879,110 @@ approval barrier without widening the relationship scope.</p>
 <ul>
 <li><code>Purge Parts Data</code> removes part/BOM/file data and should be used only with backups and explicit maintenance windows.</li>
 </ul>
-</div></details></section><section class="help-chapter"><h1 id="installation">Installation</h1><div class="help-intro">
-<p>This page covers first deployment, safe updates, and operating basics for TinyMRP v2.</p>
-</div><details class="help-section" id="sec-full-deployment-guides" open><summary><span class="help-section-title" id="full-deployment-guides">Full deployment guides</span></summary><div class="help-section-body">
-<p>Step-by-step guides for every deployment option live in <code>docs/deployment/</code> in
-the repository, and can be read on GitHub before you have a server:</p>
+</div></details></section><section class="help-chapter"><h1 id="installing-and-running-the-server">Installing and running the server</h1><div class="help-intro">
+<p><strong>The deployment guides in <code>docs/deployment/</code> are the single source of truth for
+installing TinyMRP.</strong> They are written to be read on GitHub before you have a
+server, they are the pages the installers themselves refer to, and they are the
+only place install steps are maintained. This page does not repeat them — it
+tells you which one to open, and then gives you the two tables that are
+generated from the code and so cannot be kept anywhere else.</p>
+<p>If someone sent you here to install a server, the page you want is almost
+certainly <strong><code>docs/deployment/01-vm-docker.md</code></strong>.</p>
+</div><details class="help-section" id="sec-which-guide" open><summary><span class="help-section-title" id="which-guide">Which guide</span></summary><div class="help-section-body">
 <table>
 <thead>
 <tr>
-<th>Guide</th>
-<th>Covers</th>
+<th>You have</th>
+<th>Open</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>docs/deployment/README.md</code></td>
-<td>Which path to choose, and the three settings TinyMRP actually needs</td>
-</tr>
-<tr>
-<td><code>docs/deployment/01-vm-docker.md</code></td>
-<td>A VM or server with Docker — the recommended single-instance path</td>
-</tr>
-<tr>
-<td><code>docs/deployment/02-linux-bare-metal.md</code></td>
-<td>systemd + gunicorn + nginx, no Docker</td>
-</tr>
-<tr>
-<td><code>docs/deployment/03-windows-lan.md</code></td>
-<td>Windows on an office LAN</td>
-</tr>
-<tr>
-<td><code>docs/deployment/04-vps-multi-instance.md</code></td>
-<td>The guided Caddy multi-instance VPS path below, in detail</td>
-</tr>
-<tr>
-<td><code>docs/deployment/05-configuration-reference.md</code></td>
-<td>Every environment variable</td>
-</tr>
-<tr>
-<td><code>docs/deployment/06-first-run.md</code></td>
-<td>Administrator, roles, and the evaluation dataset</td>
-</tr>
-<tr>
-<td><code>docs/deployment/07-troubleshooting.md</code></td>
-<td>Symptom-first fixes</td>
-</tr>
-<tr>
-<td><code>docs/deployment/08-networking-and-tls.md</code></td>
-<td>Addresses, firewalls, and adding HTTPS to a LAN</td>
-</tr>
-<tr>
-<td><code>docs/deployment/10-operations.md</code></td>
-<td>Backups, updates, uninstall</td>
-</tr>
-</tbody>
-</table>
-<p><strong>One setting decides whether a deployment works at all: <code>TINYMRP_URL</code>.</strong> It is
-the address users type, scheme included. Its scheme determines whether session
-cookies are marked <code>Secure</code> and whether the page asks browsers to upgrade
-assets to HTTPS. Declaring <code>https://</code> on a plain-HTTP LAN deployment makes every
-login bounce back to the login form.</p>
-</div></details><details class="help-section" id="sec-deployment-options"><summary><span class="help-section-title" id="deployment-options">Deployment Options</span></summary><div class="help-section-body">
-<h3 id="recommended-guided-ubuntu-deployment">Recommended: Guided Ubuntu deployment</h3>
-<p>Use the guided Linux deployment scripts for production and pilot environments. This path uses:</p>
-<ul>
-<li>Docker for the app containers</li>
-<li>Caddy as the public reverse proxy</li>
-<li>automatic HTTPS certificate management</li>
-<li>private MongoDB containers</li>
-<li>built-in DNS guidance and DNS validation</li>
-<li>TinyMRP app file serving for protected deliverables by default</li>
-</ul>
-<p>Main guide:</p>
-<ul>
-<li><code>deploy/README.md</code></li>
-</ul>
-<p>Main commands:</p>
-<pre><code class="language-bash">sudo ./deploy/scripts/install-host.sh --base-domain tinymrp.com
-sudo ./deploy/scripts/create-instance.sh company1 company1.tinymrp.com
-sudo ./deploy/scripts/install-nextcloud-instance.sh company1 cloud.company1.tinymrp.com
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --read-only --non-interactive
-sudo ./deploy/scripts/doctor.sh
-</code></pre>
-<p>Operational update commands:</p>
-<pre><code class="language-bash">sudo ./deploy/scripts/update-repo.sh
-sudo ./deploy/scripts/update-instance.sh company1
-sudo ./deploy/scripts/update-all-instances.sh
-sudo ./deploy/scripts/rollback-instance.sh company1
-</code></pre>
-<h3 id="single-vm-or-server-with-docker">Single VM or server with Docker</h3>
-<p>The simplest supported deployment, and the one to use for a container in a VM.
-It runs TinyMRP, MongoDB and Redis and nothing else — no Nextcloud, no
-multi-instance machinery.</p>
-<pre><code class="language-bash">./deploy/community/install.sh --build --with-demo-data
-</code></pre>
-<p>It asks for a deliverables folder, an access mode (<code>localhost</code>, <code>lan</code> or
-<code>domain</code>) with its address, and the first administrator; it generates every
-secret itself. Full guide: <code>docs/deployment/01-vm-docker.md</code>.</p>
-<h3 id="hardened-windows-lan-only-no-docker">Hardened Windows LAN-Only (No Docker)</h3>
-<p>Use this when IT requires a Windows workstation deployment with internal-only access.</p>
-<ul>
-<li>Guide: <code>docs/deployment/03-windows-lan.md</code> (or the condensed
-<code>deploy/windows/README.md</code>)</li>
-<li>IT ticket template: <code>deploy/windows/IT_REQUEST_TEMPLATE.md</code></li>
-<li>Hardened env template: <code>deploy/windows/.env.windows.lan.example</code></li>
-</ul>
-<h3 id="advanced-local-developer-runtime">Advanced: Local developer runtime</h3>
-<p>Use direct Python and Node only for development and debugging.
-Guide: <code>docs/deployment/09-local-development.md</code>.</p>
-</div></details><details class="help-section" id="sec-prerequisites"><summary><span class="help-section-title" id="prerequisites">Prerequisites</span></summary><div class="help-section-body">
-<ul>
-<li>Ubuntu host with internet access on ports <code>80</code> and <code>443</code>.</li>
-<li>A domain or subdomain you can point to the server.</li>
-<li>Access to edit DNS records at your DNS provider.</li>
-<li><code>sudo</code> access on the host.</li>
-</ul>
-</div></details><details class="help-section" id="sec-first-time-setup-guided-ubuntu"><summary><span class="help-section-title" id="first-time-setup-guided-ubuntu">First-Time Setup (Guided Ubuntu)</span></summary><div class="help-section-body">
-<h3 id="1-install-host-services">1) Install host services</h3>
-<pre><code class="language-bash">sudo ./deploy/scripts/install-host.sh --base-domain tinymrp.com
-</code></pre>
-<p>This stores host config in <code>/srv/tinymrp/host/.env</code> and starts the shared Caddy reverse proxy.</p>
-<h3 id="2-create-an-instance">2) Create an instance</h3>
-<pre><code class="language-bash">sudo ./deploy/scripts/create-instance.sh company1 company1.tinymrp.com
-</code></pre>
-<p>The script:</p>
-<ul>
-<li>detects the public IP</li>
-<li>prints the exact DNS record to create</li>
-<li>waits for DNS to resolve correctly</li>
-<li>creates the app and private MongoDB containers</li>
-<li>creates the Caddy route</li>
-<li>enables HTTPS automatically for public domains</li>
-</ul>
-<p>The installer generates the first administrator credentials before Docker is
-started and shows them once in the invoking terminal. The app container does not
-generate or log passwords. Existing users and password hashes are not changed on
-restart or update. If an empty database is missing valid bootstrap credentials,
-the app stays unhealthy and the guided deployment reports the failure.</p>
-<p>Generated file-serving defaults for guided Caddy deployments:</p>
-<ul>
-<li><code>FILES_LOCAL_ROOT=&quot;/data/deliverables&quot;</code></li>
-<li><code>FILES_URL_PREFIX=&quot;/deliverables&quot;</code></li>
-<li><code>FILES_PUBLIC_URLS=&quot;false&quot;</code></li>
-<li><code>FILES_ACCEL_REDIRECT_PREFIX=&quot;&quot;</code></li>
-</ul>
-<p>Keep the deliverables bind mount at <code>/srv/tinymrp/instances/&lt;instance&gt;/deliverables:/data/deliverables</code>. Do not set <code>FILES_ACCEL_REDIRECT_PREFIX=&quot;/__files&quot;</code> for Caddy unless you explicitly implement and validate a Caddy-compatible protected static offload flow.</p>
-<h3 id="3-open-tinymrp">3) Open TinyMRP</h3>
-<ul>
-<li>URL: <code>https://company1.tinymrp.com</code></li>
-<li>Login with the generated canonical administrator account from the installer output.</li>
-</ul>
-</div></details><details class="help-section" id="sec-dns-and-domain-setup"><summary><span class="help-section-title" id="dns-and-domain-setup">DNS And Domain Setup</span></summary><div class="help-section-body">
-<p>Examples:</p>
-<ul>
-<li><code>company1.tinymrp.com</code> -&gt; <code>A company1 &lt;server-ip&gt;</code></li>
-<li><code>tinymrp.customercompany.com</code> -&gt; <code>A tinymrp &lt;server-ip&gt;</code></li>
-<li><code>customercompany.com</code> -&gt; <code>A @ &lt;server-ip&gt;</code></li>
-<li><code>cloud.tinymrp.com</code> -&gt; <code>A cloud &lt;server-ip&gt;</code></li>
-</ul>
-<p>If the host has IPv6, the scripts also print an optional <code>AAAA</code> record.</p>
-</div></details><details class="help-section" id="sec-nextcloud"><summary><span class="help-section-title" id="nextcloud">Nextcloud</span></summary><div class="help-section-body">
-<p>The recommended multi-company path is one independent Nextcloud per TinyMRP company instance:</p>
-<pre><code class="language-bash">sudo ./deploy/scripts/install-nextcloud-instance.sh company1 cloud.company1.tinymrp.com
-sudo ./deploy/scripts/install-nextcloud-instance.sh company2 cloud.company2.tinymrp.com
-</code></pre>
-<p>Then link one or more TinyMRP instances without editing Compose or running <code>occ</code> commands by hand:</p>
-<pre><code class="language-bash">sudo ./deploy/scripts/link-nextcloud-instance.sh company1
-sudo ./deploy/scripts/link-nextcloud-instance.sh company2 --read-only --non-interactive
-</code></pre>
-<p>This keeps TinyMRP as the storage owner. Deliverables stay under <code>/srv/tinymrp/instances/&lt;instance&gt;/deliverables</code>, each company Nextcloud lives under <code>/srv/tinymrp/nextcloud/&lt;instance&gt;/</code>, the link script writes a managed <code>compose.tinymrp-deliverables.override.yml</code> inside that Nextcloud root, and the default Caddy deployment keeps <code>FILES_ACCEL_REDIRECT_PREFIX=&quot;&quot;</code>.</p>
-<p>The link flow now also handles Nextcloud external-storage rescans for server-side TinyMRP file changes:</p>
-<ul>
-<li>it runs an immediate scan after linking</li>
-<li>it installs a recurring scan job by default</li>
-<li>it refreshes both the external-storage cache and the user-visible mount paths</li>
-<li>this keeps TinyMRP import and upload-pack files visible to Nextcloud desktop clients without a manual <code>occ</code> scan</li>
-</ul>
-<p>The link script now asks which mode to use unless you pass a flag:</p>
-<ul>
-<li>Read-only is the default and safest option. Nextcloud can view, download, and share deliverables, but cannot change them.</li>
-<li>Bidirectional mode is needed for trusted Windows or Mac Nextcloud desktop-client workflows that must upload or sync files back into the VPS deliverables folder.</li>
-<li>Bidirectional mode is higher risk because Nextcloud users can modify or delete TinyMRP deliverables.</li>
-</ul>
-<p>Recommended default:</p>
-<ul>
-<li>use read-only for customer sharing and downloads</li>
-<li>use bidirectional only for trusted internal sync workflows</li>
-</ul>
-<p>Examples:</p>
-<pre><code class="language-bash">sudo ./deploy/scripts/link-nextcloud-instance.sh company1
-sudo ./deploy/scripts/scan-nextcloud-instance.sh company1
-sudo ./deploy/scripts/install-nextcloud-scan-job.sh company1 --interval-minutes 5
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --read-only
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --bidirectional
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --read-only
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --bidirectional
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --scan-now-only --read-only --non-interactive
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --nextcloud-instance global --read-only --non-interactive
-</code></pre>
-<p><code>--non-interactive</code> requires either <code>--read-only</code> or <code>--bidirectional</code>.</p>
-<p>Legacy shared/global Nextcloud is still available through <code>install-nextcloud.sh</code>, but it is not the recommended path for multi-company deployments and it is not re-domained automatically. If you intentionally keep using it, target it with <code>--nextcloud-instance global</code>.</p>
-<p>Server-side Nextcloud sync smoke test:</p>
-<ol>
-<li>Create the test folder and file on the host:
-<code>sudo install -d /srv/tinymrp/instances/&lt;instance&gt;/deliverables/nextcloud-server-side-sync-test</code>
-<code>printf 'server-side sync test\n' | sudo tee /srv/tinymrp/instances/&lt;instance&gt;/deliverables/nextcloud-server-side-sync-test/server-created.txt &gt;/dev/null</code></li>
-<li>Run <code>sudo ./deploy/scripts/scan-nextcloud-instance.sh &lt;instance&gt; --nextcloud-instance &lt;selector&gt;</code>.</li>
-<li>Confirm the scan output includes <code>PASS: User path scan completed for &lt;user&gt;/files/TinyMRP - &lt;instance&gt; Deliverables</code>.</li>
-<li>Verify the file appears in the Nextcloud web UI inside <code>TinyMRP - &lt;instance&gt; Deliverables/nextcloud-server-side-sync-test/server-created.txt</code>.</li>
-<li>If a desktop client is connected, verify it downloads the file after the scan job runs or immediately after the manual scan completes.</li>
-</ol>
-</div></details><details class="help-section" id="sec-updating-and-rollback"><summary><span class="help-section-title" id="updating-and-rollback">Updating And Rollback</span></summary><div class="help-section-body">
-<p>Repository update:</p>
-<pre><code class="language-bash">cd /opt/TinyMRP-v2
-sudo ./deploy/scripts/update-repo.sh
-</code></pre>
-<p>Per-instance update:</p>
-<pre><code class="language-bash">sudo ./deploy/scripts/update-instance.sh company1
-</code></pre>
-<p>Batch update:</p>
-<pre><code class="language-bash">sudo ./deploy/scripts/update-all-instances.sh
-</code></pre>
-<p>Rollback:</p>
-<pre><code class="language-bash">sudo ./deploy/scripts/rollback-instance.sh company1
-</code></pre>
-<p>Per-instance update metadata lives under <code>/srv/tinymrp/instances/&lt;instance&gt;/updates/</code>.</p>
-<p>Backed up automatically before each update:</p>
-<ul>
-<li><code>.env</code></li>
-<li><code>compose.yml</code></li>
-<li>current update state</li>
-<li>the instance Caddy route file if present</li>
-</ul>
-<p>Not touched by the normal update flow:</p>
-<ul>
-<li>MongoDB data</li>
-<li>deliverables</li>
-<li>generated secrets</li>
-</ul>
-<p>If a release requires a migration, stop after <code>update-repo.sh</code>, take a manual MongoDB backup, update one pilot instance first, and only then continue with the rest of the fleet.</p>
-<p>To pin one instance to an older tested build:</p>
-<pre><code class="language-bash">sudo ./deploy/scripts/update-instance.sh company1 --image tinymrp-app:abc123def456 --git-commit 0123456789abcdef
-</code></pre>
-</div></details><details class="help-section" id="sec-deliverables-smoke-test"><summary><span class="help-section-title" id="deliverables-smoke-test">Deliverables Smoke Test</span></summary><div class="help-section-body">
-<p>After importing a small Upload Pack with files under <code>deliverables/png</code> and <code>deliverables/pdf</code>, verify:</p>
-<ol>
-<li>Files exist on the host under <code>/srv/tinymrp/instances/&lt;instance&gt;/deliverables</code>.</li>
-<li>The app container sees them under <code>/data/deliverables</code>.</li>
-<li>TinyMRP can display or download them through the normal <code>/deliverables</code> route.</li>
-<li>The default Caddy deployment is not relying on a <code>&quot;/__files&quot;</code> redirect.</li>
-</ol>
-</div></details><details class="help-section" id="sec-recover-a-broken-caddy-instance"><summary><span class="help-section-title" id="recover-a-broken-caddy-instance">Recover A Broken Caddy Instance</span></summary><div class="help-section-body">
-<p>If an existing Caddy deployment still has <code>FILES_ACCEL_REDIRECT_PREFIX=&quot;/__files&quot;</code>, run:</p>
-<pre><code class="language-bash">cd /srv/tinymrp/instances/&lt;instance&gt;
-sudo cp .env &quot;.env.bak.$(date +%Y%m%d-%H%M%S)&quot;
-sudo sed -i 's#^FILES_ACCEL_REDIRECT_PREFIX=.*#FILES_ACCEL_REDIRECT_PREFIX=&quot;&quot;#' .env
-sudo docker compose up -d --force-recreate
-</code></pre>
-</div></details><details class="help-section" id="sec-local-vm-mode"><summary><span class="help-section-title" id="local-vm-mode">Local VM Mode</span></summary><div class="help-section-body">
-<p>For local-only testing:</p>
-<pre><code class="language-bash">sudo ./deploy/scripts/install-host.sh --local-mode http
-sudo ./deploy/scripts/create-instance.sh demo demo.test.local --local-mode http
-</code></pre>
-<p>Local domains such as <code>demo.test.local</code> and <code>demo.localhost</code> do not use public Let's Encrypt certificates.</p>
-<p><code>--local-mode http</code> serves the instance over plain HTTP and writes
-<code>TINYMRP_URL=http://&lt;domain&gt;</code> into the instance <code>.env</code>. That is what keeps the
-session cookie storable on a plain-HTTP origin and stops the page asking
-browsers to upgrade its assets to TLS. <code>--local-mode internal-tls</code> uses Caddy's
-internal CA instead and writes an <code>https://</code> URL; every client must then trust
-that CA.</p>
-</div></details><details class="help-section" id="sec-authentication-on-guided-caddy-instances"><summary><span class="help-section-title" id="authentication-on-guided-caddy-instances">Authentication on guided Caddy instances</span></summary><div class="help-section-body">
-<p>There is one security model. Every new instance gets an exact allowed origin
-and strong generated secrets. Caddy remains the TLS endpoint and forwards the
-host and scheme the browser used. Normal browser pages and APIs use the signed
-session; unsafe browser API requests must carry a same-origin Origin or
-Referer. The SolidWorks add-in and other integrations use API bearer tokens.
-Public part shares remain limited to their opaque share URL, and <code>/api/health</code>
-stays anonymous for Caddy and Docker health checks.</p>
-<p>The old compat mode and its second set of CORS, CSRF, cookie and upload rules
-were removed, along with <code>TINYMRP_SECURITY_MODE</code>. Nothing needs migrating: the
-strict path is now the only path.</p>
-</div></details><details class="help-section" id="sec-windows-lan-only-setup-no-docker"><summary><span class="help-section-title" id="windows-lan-only-setup-no-docker">Windows LAN-Only Setup (No Docker)</span></summary><div class="help-section-body">
-<p>Use this path for service-based Windows deployment with NGINX reverse proxy + Waitress.</p>
-<ol>
-<li>Follow <code>deploy/windows/README.md</code> step-by-step.</li>
-<li>Keep Flask app private on <code>127.0.0.1:8000</code>.</li>
-<li>Keep MongoDB private on <code>127.0.0.1:27017</code> (or separate internal DB server).</li>
-<li>Expose only NGINX HTTP (<code>80</code>) to allowed LAN ranges.</li>
-</ol>
-<p>Compatibility note (as of 2026-02-24):</p>
-<ul>
-<li>Windows 10 support ended on 2025-10-14.</li>
-<li>MongoDB current Windows support tables list Windows 11 / Windows Server variants for modern releases.</li>
-<li>NGINX on Windows has known limitations and does not run as a native Windows service without a wrapper.</li>
-<li>If host OS must stay Windows 10, prefer running MongoDB on a separate supported host and point <code>MONGO_URI</code> there.</li>
-</ul>
-</div></details><details class="help-section" id="sec-file-storage-rules"><summary><span class="help-section-title" id="file-storage-rules">File Storage Rules</span></summary><div class="help-section-body">
-<p>TinyMRP matches files by part number and revision. Standard groups include:</p>
-<ul>
-<li><code>pdf</code>, <code>dxf</code>, <code>step</code>, <code>edr</code>, <code>3mf</code>, <code>ply</code>, <code>stl</code>, <code>png</code>, <code>datasheet</code></li>
-</ul>
-<p>Expected naming pattern:</p>
-<ul>
-<li><code>PARTNUMBER_REV_REVISION.ext</code></li>
-<li>Drawing preview PNG commonly appears as <code>*_DWG.png</code>.</li>
-</ul>
-<p>If revision is blank, empty revision tokens are allowed and should be treated as valid.</p>
-</div></details><details class="help-section" id="sec-upload-pack-limits-2"><summary><span class="help-section-title" id="upload-pack-limits-2">Upload Pack Limits</span></summary><div class="help-section-body">
-<p>Global defaults can be controlled by env and admin settings:</p>
-<ul>
-<li>Max ZIP size</li>
-<li>Max single file size</li>
-<li>Max files per ZIP</li>
-</ul>
-<p>These limits are enforced during <code>/api/upload/pack</code> processing.</p>
-</div></details><details class="help-section" id="sec-local-development-advanced"><summary><span class="help-section-title" id="local-development-advanced">Local Development (Advanced)</span></summary><div class="help-section-body">
-<ol>
-<li>Install Python dependencies: <code>pip install -r requirements.txt</code></li>
-<li>Install frontend dependencies in <code>frontend/</code>: <code>npm install</code></li>
-<li>Run backend (<code>python run.py</code>) and build frontend (<code>npm run build</code> or <code>npm run dev</code>)</li>
-</ol>
-</div></details><details class="help-section" id="sec-upgrade-procedure"><summary><span class="help-section-title" id="upgrade-procedure">Upgrade Procedure</span></summary><div class="help-section-body">
-<ol>
-<li>Pull latest code.</li>
-<li>Rebuild and restart containers:</li>
-</ol>
-<pre><code class="language-powershell">docker compose up -d --build
-</code></pre>
-<ol start="3">
-<li>Re-run <code>seed-roles</code> only if role definitions were intentionally updated by release notes.</li>
-<li>Validate critical pages:</li>
-</ol>
-<ul>
-<li><code>/ui/parts</code></li>
-<li><code>/ui/part/&lt;pn&gt;</code></li>
-<li><code>/ui/upload-pack</code></li>
-<li><code>/admin/jobs/</code></li>
-<li><code>/admin/orders/</code></li>
-</ul>
-</div></details><details class="help-section" id="sec-backup-recommendations"><summary><span class="help-section-title" id="backup-recommendations">Backup Recommendations</span></summary><div class="help-section-body">
-<ul>
-<li>Database backup (MongoDB dump/snapshot).</li>
-<li>Deliverables file root backup.</li>
-<li><code>instance/</code> backup if used for runtime files.</li>
-<li>Branding and app settings backup.</li>
-</ul>
-</div></details><details class="help-section" id="sec-security-baseline"><summary><span class="help-section-title" id="security-baseline">Security Baseline</span></summary><div class="help-section-body">
-<ul>
-<li>Keep <code>SECRET_KEY</code> and <code>SECURITY_PASSWORD_SALT</code> strong and private.</li>
-<li>Run HTTPS in production.</li>
-<li>Keep <code>FILES_PUBLIC_URLS</code> disabled unless you explicitly need public file links.</li>
-<li>Use roles and permissions instead of code edits for access control.</li>
-</ul>
-</div></details><details class="help-section" id="sec-help-build-command"><summary><span class="help-section-title" id="help-build-command">Help Build Command</span></summary><div class="help-section-body">
-<p>After updating help markdown:</p>
-<pre><code class="language-powershell">flask --app run.py help build
-</code></pre>
-<p>This regenerates:</p>
-<ul>
-<li><code>app/static/help/help.html</code></li>
-<li><code>app/static/help/help_toc.json</code></li>
-</ul>
-</div></details></section><section class="help-chapter"><h1 id="deployment-step-by-step">Deployment: step by step</h1><div class="help-intro">
-<p>Pick your situation, run the script, answer the questions. Every variant below
-is a numbered sequence you can follow without prior knowledge of TinyMRP, and
-every command can be copy-pasted.</p>
-<p>The same guides, plus deeper reference material, are in <code>docs/deployment/</code> in
-the repository, readable on GitHub before anything is installed.</p>
-</div><details class="help-section" id="sec-the-only-three-things-you-configure" open><summary><span class="help-section-title" id="the-only-three-things-you-configure">The only three things you configure</span></summary><div class="help-section-body">
-<p>Everything else is generated or has a working default.</p>
-<table>
-<thead>
-<tr>
-<th></th>
-<th>Setting</th>
-<th>Example</th>
-<th>Why it matters</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>1</td>
-<td>Deliverables folder</td>
-<td><code>/srv/tinymrp/deliverables</code>, <code>C:/TinyMRP/data/deliverables</code></td>
-<td>Holds <code>pdf/</code>, <code>png/</code>, <code>step/</code>, <code>edr/</code>… TinyMRP reads from it and writes thumbnails and uploads into it.</td>
-</tr>
-<tr>
-<td>2</td>
-<td><strong><code>TINYMRP_URL</code></strong></td>
-<td><code>http://192.168.1.50:5000</code>, <code>https://tinymrp.example.com</code></td>
-<td>The address users type, <strong>scheme included</strong>.</td>
-</tr>
-<tr>
-<td>3</td>
-<td>Port (optional)</td>
-<td><code>5000</code></td>
-<td>Defaults to 5000. If you change it, it must also appear in <code>TINYMRP_URL</code>.</td>
-</tr>
-</tbody>
-</table>
-<p><strong><code>TINYMRP_URL</code> is the setting that decides whether login works at all.</strong> Its
-scheme tells TinyMRP whether browsers reach it over TLS:</p>
-<ul>
-<li><code>https://</code> → session cookies are marked <code>Secure</code> and the page asks browsers
-to upgrade assets to HTTPS. Correct behind TLS.</li>
-<li><code>http://</code> → neither. Correct on a plain-HTTP network.</li>
-</ul>
-<p>Declare <code>https://</code> on a plain-HTTP deployment and a browser refuses to store
-the session cookie, so every login bounces back to the login page with
-<em>&quot;CSRF session token is missing&quot;</em> and no explanation. Leave it unset and
-TinyMRP assumes HTTPS, which produces the same failure.</p>
-<p>None of this shows up on <code>http://localhost</code>, because browsers treat loopback as
-a trusted origin and exempt it. A LAN address gets no exemption — which is why
-a broken configuration can look perfect on the machine it runs on.</p>
-</div></details><details class="help-section" id="sec-which-variant-am-i"><summary><span class="help-section-title" id="which-variant-am-i">Which variant am I?</span></summary><div class="help-section-body">
-<table>
-<thead>
-<tr>
-<th>Situation</th>
-<th>Guide below</th>
-<th>Main script</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Linux VM or server, Docker available</td>
-<td><a href="#a-linux-vm-or-server-with-docker">A</a></td>
-<td><code>deploy/community/install.sh</code></td>
+<td><strong>A Linux VM or server with Docker — the recommended path</strong></td>
+<td><strong><code>docs/deployment/01-vm-docker.md</code></strong></td>
 </tr>
 <tr>
 <td>Windows with Docker Desktop</td>
-<td><a href="#b-windows-with-docker-desktop">B</a></td>
-<td><code>deploy/community/install.ps1</code></td>
+<td><code>docs/deployment/01-vm-docker.md</code>, &quot;Windows Docker Desktop&quot; section</td>
 </tr>
 <tr>
-<td>Linux, Docker not permitted</td>
-<td><a href="#c-linux-without-docker">C</a></td>
-<td><code>deploy/scripts/install-server.sh</code></td>
+<td>A Linux server where Docker is not permitted</td>
+<td><code>docs/deployment/02-linux-bare-metal.md</code></td>
 </tr>
 <tr>
-<td>Windows office LAN, service install</td>
-<td><a href="#d-windows-lan-service">D</a></td>
-<td><code>deploy/windows/install_tinymrp_service.ps1</code></td>
+<td>A Windows machine on an office LAN</td>
+<td><code>docs/deployment/03-windows-lan.md</code></td>
 </tr>
 <tr>
-<td>Windows locked-down host, <code>python run.py</code> only</td>
-<td><a href="#e-windows-restricted-host-runpy">E</a></td>
-<td><code>deploy/windows-restricted/start-tinymrp.cmd</code></td>
+<td>A locked-down Windows host where only <code>python run.py</code> is approved</td>
+<td><code>docs/deployment/12-restricted-windows-flask.md</code></td>
 </tr>
 <tr>
-<td>Public VPS, several companies</td>
-<td><a href="#f-vps-with-several-instances">F</a></td>
-<td><code>deploy/scripts/create-instance.sh</code></td>
+<td>A public VPS hosting several companies</td>
+<td><code>docs/deployment/04-vps-multi-instance.md</code></td>
+</tr>
+<tr>
+<td>A developer machine</td>
+<td><code>docs/deployment/09-local-development.md</code></td>
 </tr>
 </tbody>
 </table>
-</div></details><details class="help-section" id="sec-a-linux-vm-or-server-with-docker"><summary><span class="help-section-title" id="a-linux-vm-or-server-with-docker">A. Linux VM or server with Docker</span></summary><div class="help-section-body">
-<ol>
-<li>
-<p>Install Docker: <code>curl -fsSL https://get.docker.com | sudo sh</code>, then
-<code>sudo usermod -aG docker &quot;$USER&quot;</code> and log out and back in.</p>
-</li>
-<li>
-<p>Get the code: <code>sudo git clone &lt;repo&gt; /opt/tinymrp_v2 &amp;&amp; sudo chown -R &quot;$USER&quot;:&quot;$USER&quot; /opt/tinymrp_v2</code></p>
-</li>
-<li>
-<p>Create the deliverables folder:
-<code>sudo mkdir -p /srv/tinymrp/deliverables &amp;&amp; sudo chown -R 1000:1000 /srv/tinymrp/deliverables</code></p>
-</li>
-<li>
-<p>Run the installer:</p>
-<pre><code class="language-bash">cd /opt/tinymrp_v2
-./deploy/community/install.sh --build --with-demo-data
+<p>Each guide is self-contained: prerequisites, the install command, what every
+question means, first login, day-to-day operation, and the failures specific to
+that path. You should not need to read two of them.</p>
+</div></details><details class="help-section" id="sec-then-whichever-path-you-took"><summary><span class="help-section-title" id="then-whichever-path-you-took">Then, whichever path you took</span></summary><div class="help-section-body">
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>Page</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>What does this environment variable do?</td>
+<td><code>docs/deployment/05-configuration-reference.md</code></td>
+</tr>
+<tr>
+<td>How do I log in, seed roles, load the sample dataset?</td>
+<td><code>docs/deployment/06-first-run.md</code></td>
+</tr>
+<tr>
+<td>Something is broken</td>
+<td><code>docs/deployment/07-troubleshooting.md</code></td>
+</tr>
+<tr>
+<td>Addresses, firewalls, TLS, adding HTTPS to a LAN</td>
+<td><code>docs/deployment/08-networking-and-tls.md</code></td>
+</tr>
+<tr>
+<td>Backups, updates, uninstall</td>
+<td><code>docs/deployment/10-operations.md</code></td>
+</tr>
+<tr>
+<td>The question people actually ask</td>
+<td><code>docs/deployment/11-faq.md</code></td>
+</tr>
+</tbody>
+</table>
+</div></details><details class="help-section" id="sec-the-recommended-path-in-brief"><summary><span class="help-section-title" id="the-recommended-path-in-brief">The recommended path in brief</span></summary><div class="help-section-body">
+<p>On a Linux VM with Docker, from a clone:</p>
+<pre><code class="language-bash">./deploy/community/install.sh --build
 </code></pre>
-</li>
-<li>
-<p>Answer: deliverables folder, access mode (<code>localhost</code>, <code>lan</code> or <code>domain</code>),
-the address users will type, administrator email and password.</p>
-</li>
-<li>
-<p>Open the URL it prints and sign in.</p>
-</li>
-<li>
-<p>Open the firewall for the port, restricted to your subnet:
-<code>sudo ufw allow from 192.168.1.0/24 to any port 5000 proto tcp</code></p>
-</li>
-</ol>
-<p>Operate it with <code>./deploy/community/tinymrp.sh status|logs|backup|update|uninstall</code>.</p>
-<p><code>--build</code> builds the image from the checkout, which is what a git clone needs.
-<code>--with-demo-data</code> loads 494 sample files, a real BOM and one login per role so
-the install can be exercised immediately; omit it for a production instance.</p>
-</div></details><details class="help-section" id="sec-b-windows-with-docker-desktop"><summary><span class="help-section-title" id="b-windows-with-docker-desktop">B. Windows with Docker Desktop</span></summary><div class="help-section-body">
-<ol>
-<li>
-<p>Install Docker Desktop and start it. Under <strong>Settings → Resources → File
-Sharing</strong>, add the drive holding your deliverables folder.</p>
-</li>
-<li>
-<p>Get the code, then:</p>
-<pre><code class="language-powershell">cd C:\TinyMRP\Server\tinymrp_v2\deploy\community
-powershell -ExecutionPolicy Bypass -File .\install.ps1 -Build -WithDemoData
+<p>Add <code>--with-demo-data</code> to load the CV03 sample dataset and one login per role
+for evaluation; leave it off for an instance that will hold real data.</p>
+<p>It asks for a deliverables folder, an access mode with its address, and the
+first administrator, and generates every secret itself. Afterwards:</p>
+<pre><code class="language-bash">./deploy/community/tinymrp.sh status|logs|reconfigure|backup|restore|update|uninstall
 </code></pre>
-</li>
-<li>
-<p>Answer the same questions as variant A.</p>
-</li>
-<li>
-<p>In <code>lan</code> mode, accept the firewall rule when offered — from an elevated
-PowerShell.</p>
-</li>
-<li>
-<p>If other machines cannot reach it, run
-<code>deploy\windows\check_lan_access.ps1 -Port 5000 -Deployment docker</code>.</p>
-</li>
-</ol>
-<p>Operate it with <code>.\tinymrp.ps1 status|logs|backup|update|uninstall</code>. It accepts
-both <code>-IncludeDeliverables</code> and <code>--include-deliverables</code> styles.</p>
-</div></details><details class="help-section" id="sec-c-linux-without-docker"><summary><span class="help-section-title" id="c-linux-without-docker">C. Linux without Docker</span></summary><div class="help-section-body">
-<p>MongoDB, gunicorn under systemd, and nginx in front.</p>
-<pre><code class="language-bash"># LAN, plain HTTP
-sudo ./deploy/scripts/install-server.sh \
-  --http-only --url http://192.168.1.50 \
-  --deliverables /srv/tinymrp/deliverables \
-  --admin-email admin@yourcompany.com
-
-# Public domain with an automatic certificate
-sudo ./deploy/scripts/install-server.sh \
-  --domain tinymrp.example.com --certbot \
-  --admin-email admin@yourcompany.com --with-fail2ban
-</code></pre>
-<p>The installer creates the <code>tinymrp</code> service user, the virtualenv, the hardened
-systemd unit and the nginx site, generates both secrets, and prints the
-one-time administrator password. It is idempotent: re-running it syncs new code
-and keeps your <code>/etc/tinymrp/.env</code> and certificates.</p>
-<p>Node.js is not needed — the compiled frontend is committed.</p>
-<p>Then: <code>sudo systemctl status tinymrp</code>, <code>sudo journalctl -u tinymrp -f</code>.</p>
-</div></details><details class="help-section" id="sec-d-windows-lan-service"><summary><span class="help-section-title" id="d-windows-lan-service">D. Windows LAN service</span></summary><div class="help-section-body">
-<p>For an office network where a Windows service is permitted. nginx on port 80 is
-the only public listener; the app and MongoDB stay on loopback.</p>
-<ol>
-<li>
-<p>Install Python 3.12, MongoDB (as a service), and nginx into <code>C:\nginx</code>.</p>
-</li>
-<li>
-<p>Confirm MongoDB binds <code>127.0.0.1</code> in <code>mongod.cfg</code>.</p>
-</li>
-<li>
-<p>Create the virtualenv and install requirements plus waitress.</p>
-</li>
-<li>
-<p>Copy <code>deploy\windows\.env.windows.lan.example</code> to
-<code>C:\TinyMRP\config\.env.lan</code> and set the four REQUIRED values.</p>
-</li>
-<li>
-<p>Copy <code>deploy\windows\nginx.lan.conf</code> to <code>C:\nginx\conf\nginx.conf</code>, set
-<code>server_name</code> and the deliverables <code>alias</code>, then <code>nginx -t</code> and start it.</p>
-</li>
-<li>
-<p>Install the service:</p>
-<pre><code class="language-powershell">.\deploy\windows\install_tinymrp_service.ps1 -AppRoot C:\TinyMRP\app\tinymrp_v2 `
-  -EnvFile C:\TinyMRP\config\.env.lan -ReplaceExisting
-</code></pre>
-</li>
-<li>
-<p>Apply the firewall policy:</p>
-<pre><code class="language-powershell">.\deploy\windows\configure_firewall_lan.ps1 -LanRemoteRanges 192.168.0.0/24 -HttpPort 80
-</code></pre>
-</li>
-<li>
-<p>Create the administrator and, optionally, the demo dataset.</p>
-</li>
-<li>
-<p>Verify from another PC, then run <code>deploy\windows\check_lan_access.ps1</code> if it
-does not answer.</p>
-</li>
-</ol>
-</div></details><details class="help-section" id="sec-e-windows-restricted-host-runpy"><summary><span class="help-section-title" id="e-windows-restricted-host-runpy">E. Windows restricted host (<code>run.py</code>)</span></summary><div class="help-section-body">
-<p>For a locked-down machine where <code>python.exe run.py</code> is the one approved
-command: no Docker, no service, no new executable, no elevation. Users reach it
-at something like <code>http://tinymrp.local:5555</code>.</p>
-<ol>
-<li>
-<p>Preflight — it checks Python, the env file, MongoDB, the folder, the port,
-the firewall, DNS, and the live cookie and CSP:</p>
-<pre><code class="language-powershell">powershell -ExecutionPolicy Bypass -File .\deploy\windows-restricted\check-restricted-install.ps1
-</code></pre>
-</li>
-<li>
-<p>Copy <code>deploy\windows-restricted\.env.restricted.example</code> to
-<code>C:\TinyMRP\config\.env.lan</code> and set the four REQUIRED values —
-<code>TINYMRP_URL</code>, <code>FILES_LOCAL_ROOT</code>, and the two secrets.</p>
-</li>
-<li>
-<p>Start it:</p>
-<pre><code class="language-cmd">deploy\windows-restricted\start-tinymrp.cmd C:\TinyMRP\config\.env.lan
-</code></pre>
-</li>
-<li>
-<p>Create the administrator:</p>
-<pre><code class="language-cmd">set ENV_FILE=C:\TinyMRP\config\.env.lan
-.venv\Scripts\python.exe -m flask --app run.py user bootstrap-admin --email admin@company.com
-</code></pre>
-</li>
-<li>
-<p>Ask IT for an inbound TCP allow rule for your port, scoped to the office
-subnet.</p>
-</li>
-<li>
-<p>Re-run the preflight; it now also checks the live cookie and CSP headers.</p>
-</li>
-</ol>
-<p><code>run.py</code> reads the listening interface and port from <code>TINYMRP_URL</code>, so you
-never have to edit a tracked file — which is what makes <code>git pull</code> safe here.
-It uses waitress when available (a pure Python package that runs inside the
-same <code>python.exe</code>, needing no separately approved executable) and keeps the
-Flask debugger off, refusing to combine it with a network-facing bind.</p>
-</div></details><details class="help-section" id="sec-f-vps-with-several-instances"><summary><span class="help-section-title" id="f-vps-with-several-instances">F. VPS with several instances</span></summary><div class="help-section-body">
-<p>One shared Caddy proxy with automatic HTTPS, one isolated instance per company.</p>
-<pre><code class="language-bash">sudo ./deploy/scripts/install-host.sh --acme-email ops@example.com --base-domain example.com
-sudo ./deploy/scripts/create-instance.sh company1 company1.example.com
-sudo ./deploy/scripts/doctor.sh
-</code></pre>
-<p>For an internal VM with no public DNS:</p>
-<pre><code class="language-bash">sudo ./deploy/scripts/create-instance.sh shopfloor shopfloor.test.local --local-mode http
-</code></pre>
-<p>Set <code>WEB_CONCURRENCY</code> per instance once you pass two on one host.</p>
-<p>Nextcloud is <strong>optional</strong> and installed only by the scripts with <code>nextcloud</code> in
-their name. Skip them and TinyMRP works exactly as documented.</p>
-</div></details><details class="help-section" id="sec-after-any-install-first-login-and-sample-data"><summary><span class="help-section-title" id="after-any-install-first-login-and-sample-data">After any install: first login and sample data</span></summary><div class="help-section-body">
-<ol>
-<li>
-<p>Sign in as the administrator the installer created and change the password
-under <strong>Account → Password</strong>.</p>
-</li>
-<li>
-<p>Load the evaluation dataset so the install can be exercised before real data
-arrives:</p>
-<pre><code>flask --app run.py demo install
-</code></pre>
-<p>It copies 494 sample files, seeds the <code>CV03-TR-A01</code> assembly with its BOM,
-and creates one login per role scenario. Passwords print once; capture them
-with <code>&gt; demo-credentials.json</code>.</p>
-</li>
-<li>
-<p>Work through the acceptance test: health, readiness, login <strong>from another
-machine</strong>, sample data, open a file, expand a BOM, sign in as a demo
-customer and confirm it sees only its own parts, import a small pack,
-restart, take a backup.</p>
-</li>
-<li>
-<p>Remove the demo accounts before real data:
-<code>flask --app run.py demo remove --disable</code></p>
-</li>
-</ol>
+<p><code>reconfigure</code> is how you change the address, port or access mode later. Do not
+hand-edit <code>.env</code>: eight keys have to agree, and when they disagree the symptom
+is a silent login loop rather than an error.</p>
+<p>The one setting that decides whether a deployment works at all is
+<code>TINYMRP_URL</code> — the address users type, <strong>scheme included</strong>. Its scheme is what
+tells the app whether to mark session cookies <code>Secure</code>. Declaring <code>https://</code> on
+a plain-HTTP deployment makes every login bounce back to the login form.
+<code>reconfigure</code> derives it for you, which is the reason it exists.</p>
 </div></details><details class="help-section" id="sec-every-deployment-script-and-its-options"><summary><span class="help-section-title" id="every-deployment-script-and-its-options">Every deployment script and its options</span></summary><div class="help-section-body">
 <p>Generated from the scripts themselves, so it cannot drift from what they
 actually accept. Run any of them with <code>--help</code> or <code>Get-Help</code> for full detail.</p>
@@ -2853,60 +2304,6 @@ actually accept. Run any of them with <code>--help</code> or <code>Get-Help</cod
 </tr>
 </tbody>
 </table>
-</div></details><details class="help-section" id="sec-when-something-is-wrong"><summary><span class="help-section-title" id="when-something-is-wrong">When something is wrong</span></summary><div class="help-section-body">
-<table>
-<thead>
-<tr>
-<th>Symptom</th>
-<th>Cause</th>
-<th>Fix</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Login returns to the login page</td>
-<td><code>TINYMRP_URL</code> scheme does not match how you browse</td>
-<td>Set it to the exact address users type, including scheme and port; restart</td>
-</tr>
-<tr>
-<td>Page loads unstyled</td>
-<td>Same cause; the CSP is upgrading assets to https</td>
-<td>Same fix</td>
-</tr>
-<tr>
-<td><code>SECRET_KEY must be set to a strong value</code></td>
-<td>Secrets are mandatory and never generated</td>
-<td>Put 32+ random characters in the env file</td>
-</tr>
-<tr>
-<td><code>existing-users-skip</code> and no administrator</td>
-<td>Seeding only runs on an empty user collection</td>
-<td><code>flask user bootstrap-admin --email &lt;address&gt;</code></td>
-</tr>
-<tr>
-<td>HTTP 413 on upload</td>
-<td>Three separate caps</td>
-<td>Raise <code>UPLOAD_PACK_MAX_ZIP_MB</code>, <code>TINYMRP_MAX_CONTENT_MB</code>, and the proxy body limit</td>
-</tr>
-<tr>
-<td>Deliverables not writable</td>
-<td>Container runs as uid 1000</td>
-<td><code>sudo chown -R 1000:1000 &lt;folder&gt;</code></td>
-</tr>
-<tr>
-<td>Reachable locally, not from other machines</td>
-<td>Binding, firewall profile, or DNS</td>
-<td>Run the <code>check_lan_access.ps1</code> / <code>check-restricted-install.ps1</code> diagnostic</td>
-</tr>
-<tr>
-<td>Sample parts show but no drawing opens</td>
-<td>Records written by an older build pointed outside the storage root</td>
-<td>Re-run <code>flask demo install</code>; it repairs them</td>
-</tr>
-</tbody>
-</table>
-<p>Two endpoints answer without credentials: <code>/api/health</code> (the process is alive)
-and <code>/api/ready</code> (database reachable and disk has room). Alert on the second.</p>
 </div></details></section><section class="help-chapter"><h1 id="troubleshooting">Troubleshooting</h1><div class="help-intro">
 <p>Find your symptom, work down the list. Each entry gives the most likely cause
 first.</p>
