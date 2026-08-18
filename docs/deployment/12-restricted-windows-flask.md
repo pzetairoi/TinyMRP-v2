@@ -19,7 +19,7 @@ makes `git pull` safe.
 - [Step 5 — Let other machines in](#step-5--let-other-machines-in)
 - [Step 6 — Start automatically](#step-6--start-automatically)
 - [Updating an existing instance](#updating-an-existing-instance)
-- [Every setting run.py reads](#every-settings-runpy-reads)
+- [Every setting run.py reads](#every-setting-runpy-reads)
 - [Security of this variant](#security-of-this-variant)
 - [Copy-paste command sheet](#copy-paste-command-sheet)
 
