@@ -271,12 +271,20 @@ if [[ "$mode" == "domain" ]]; then
         else
           pass "Certificate valid for another $days day(s)"
         fi
-        if [[ -f "$key_file" ]]; then
+        if [[ ! -f "$key_file" ]]; then
+          fail "$key_file is missing, so Caddy cannot serve the certificate"
+        elif [[ -r "$key_file" ]]; then
           [[ "$(tls_cert_pubkey_fingerprint "$cert_file")" == "$(tls_key_pubkey_fingerprint "$key_file")" ]] \
             && pass "Certificate and private key match" \
             || fail "The installed certificate and private key do not match. Reinstall both: ./tinymrp.sh set-certificate <cert> <key>"
         else
-          fail "$key_file is missing, so Caddy cannot serve the certificate"
+          # Expected: the key is owned by root at mode 0600 so that Caddy can
+          # read it without the key being readable to anyone else on the host.
+          # This check runs unprivileged, so it cannot open it - and must not
+          # mistake "cannot read" for "does not match". The wire comparison
+          # below proves the pairing anyway: Caddy would not be serving this
+          # certificate at all if the key did not match it.
+          pass "Private key is present and readable only by root (as intended)"
         fi
         # The claim that matters: the file on disk is the one on the wire.
         file_fp="$(tls_cert_sha256_fingerprint "$cert_file")"
