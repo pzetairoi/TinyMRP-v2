@@ -20,7 +20,13 @@ param(
     [switch]$Build,
     # Install the CV03 sample dataset and one demo login per role after the
     # first start, and print those passwords once. Evaluation instances only.
-    [switch]$WithDemoData
+    [switch]$WithDemoData,
+    # Domain mode only: serve a certificate your organisation issued for this
+    # hostname instead of letting Caddy obtain one. Both files must be PEM.
+    [string]$TlsCert,
+    [string]$TlsKey,
+    # Never prompt. Every answer must then come from a parameter.
+    [switch]$NonInteractive
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,6 +35,7 @@ $EnvFile = Join-Path $ScriptDir '.env'
 $ComposeFile = Join-Path $ScriptDir 'compose.yaml'
 
 function Stop-WithError([string]$Message) { throw $Message }
+. (Join-Path $ScriptDir 'lib-tls.ps1')
 function Read-Default([string]$Prompt, [string]$Default) {
     $value = Read-Host "$Prompt [$Default]"
     if ([string]::IsNullOrWhiteSpace($value)) { return $Default }
@@ -59,19 +66,9 @@ function Get-ReleaseValue([string]$Name) {
     if ($line) { return $line.Substring($Name.Length + 1).Trim() }
     return ''
 }
-# A name no public certificate authority will ever issue for. Caddy detects
-# these itself and signs them with its own CA instead of asking Let's Encrypt,
-# which works but makes browsers warn until that CA is trusted. Kept in step
-# with is_internal_domain() in install.sh.
-function Test-InternalDomain([string]$Domain) {
-    $d = $Domain.ToLowerInvariant()
-    foreach ($suffix in @('.local', '.localdomain', '.localhost', '.internal', '.intranet',
-                          '.lan', '.home.arpa', '.test', '.invalid', '.example',
-                          '.example.com', '.example.org', '.example.net')) {
-        if ($d.EndsWith($suffix)) { return $true }
-    }
-    return (-not $d.Contains('.'))
-}
+# Defined once, in lib-tls.ps1, so the two installers cannot drift apart about
+# what counts as an internal name.
+function Test-InternalDomain([string]$Domain) { return Test-TlsInternalDomain $Domain }
 function Show-AccessModes {
     Write-Host @'
 
@@ -153,6 +150,7 @@ if ($Version -notmatch '^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$') { Stop-Wi
 # rate-limit bucket and a forged address in the audit log. Domain mode puts
 # Caddy in front, which overwrites them.
 $bindIp = '127.0.0.1'; $domain = ''; $acmeEmail = ''; $origin = "http://localhost:$Port"; $url = $origin; $proxyHops = 0; $internalTls = $false
+$tlsMode = 'automatic'; $tlsCertPath = ''; $tlsKeyPath = ''; $certDays = 0
 if ($AccessMode -eq 'lan') {
     if (-not $Address) {
         $detected = Get-NetIPAddress -AddressFamily IPv4 -PrefixOrigin Dhcp -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '169.254.*' } | Select-Object -ExpandProperty IPAddress -First 1
@@ -163,7 +161,48 @@ if ($AccessMode -eq 'lan') {
     if ((Test-Port 80) -or (Test-Port 443)) { Stop-WithError 'Domain mode requires free TCP ports 80 and 443.' }
     if (-not $Address) { $Address = Read-Default 'Domain users will type (DNS or hosts file must point here)' 'tinymrp.example.com' }
     $domain = $Address
-    if (Test-InternalDomain $domain) {
+
+    # Ask before describing automatic TLS: an organisation that already runs
+    # its own CA does not want a second, unknown authority.
+    if ($TlsCert) {
+        $tlsMode = 'provided'
+        $tlsCertPath = $TlsCert; $tlsKeyPath = $TlsKey
+    } elseif (-not $NonInteractive) {
+        Write-Host @'
+
+Which TLS certificate should TinyMRP serve?
+
+  1) One your organisation issued.
+     Choose this if IT can give you a certificate file and its private key for
+     this hostname, and your company root CA is already trusted on staff
+     machines (pushed by Group Policy or Intune). Nothing to install on
+     workstations afterwards, and no browser warnings.
+
+  2) Let TinyMRP obtain one automatically.
+     A public hostname gets a real certificate from Let's Encrypt, which needs
+     internet access and public DNS. An internal-only hostname gets one from
+     Caddy own authority, which works offline but is trusted by nobody until
+     you install its root certificate on every machine yourself.
+
+'@
+        if ((Read-Default 'Certificate' '1') -eq '1') {
+            $tlsMode = 'provided'
+            Write-Host ''
+            Write-Host 'Paths to the files IT gave you. Both must be PEM (text starting -----BEGIN ...).'
+            $tlsCertPath = Read-Default 'Certificate file (.crt/.pem, include intermediates)' 'C:\TinyMRP\certs\server.crt'
+            $tlsKeyPath = Read-Default 'Private key file (.key)' 'C:\TinyMRP\certs\server.key'
+        }
+    }
+
+    if ($tlsMode -eq 'provided') {
+        if (-not $tlsKeyPath) { Stop-WithError 'A private key is required alongside the certificate (-TlsKey).' }
+        Write-Host ''
+        Write-Host 'Checking the certificate...'
+        $certDays = Test-TlsPair $tlsCertPath $tlsKeyPath $domain
+        Show-TlsCert (Read-TlsCertificate $tlsCertPath)
+        if ($certDays -lt 30) { Write-Host "`nWARNING: this certificate expires in $certDays day(s)." }
+        $acmeEmail = $AdminEmail
+    } elseif (Test-InternalDomain $domain) {
         # No public CA can issue for a name like this, so Caddy signs it itself.
         # Real HTTPS, but not trusted until the root certificate is distributed.
         $internalTls = $true
@@ -226,7 +265,12 @@ Add-EnvValue $lines BACKUP_MAX_TOTAL_GB '10'
 Add-EnvValue $lines TINYMRP_DOMAIN $domain
 Add-EnvValue $lines ACME_EMAIL $acmeEmail
 Add-EnvValue $lines CADDY_BIND_IP '0.0.0.0'
+# Recorded so tinymrp.ps1 and check-install know which TLS situation this is.
+Add-EnvValue $lines TINYMRP_TLS_MODE $tlsMode
 [IO.File]::WriteAllLines($EnvFile, $lines, [Text.UTF8Encoding]::new($false))
+
+if ($tlsMode -eq 'provided') { Install-TlsProvided $ScriptDir $tlsCertPath $tlsKeyPath }
+else { Install-TlsAutomatic $ScriptDir }
 
 try {
     Invoke-DockerCommand compose --env-file $EnvFile -f $ComposeFile config --quiet | Out-Null
@@ -306,7 +350,11 @@ if ($WithDemoData -and $demoOutput) {
     Write-Host "`nRemove them before this instance holds real data:"
     Write-Host "  docker compose --env-file `"$EnvFile`" -f `"$ComposeFile`" exec -T app flask --app run.py demo remove --disable"
 }
-if ($internalTls) {
+if ($tlsMode -eq 'provided') {
+    Write-Host "`n$domain is served with your organisation certificate. Machines that"
+    Write-Host 'already trust your CA need nothing installed.'
+    Write-Host "Replace it later with:  .	inymrp.ps1 set-certificate <cert> <key>"
+} elseif ($internalTls) {
     Write-Host "`n$domain uses a certificate from Caddy's own authority. Export the"
     Write-Host 'root certificate once:'
     Write-Host ''

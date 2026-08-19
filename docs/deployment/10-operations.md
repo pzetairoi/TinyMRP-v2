@@ -163,6 +163,22 @@ Asking a checkout-built install for a version number is also rejected, with an
 explanation: its image was built locally and never published, so there is no
 such tag to pull.
 
+#### Renewing a TLS certificate
+
+Certificates expire. On a Docker install serving an organisation-issued
+certificate, a renewal is one command and needs no reinstall and no downtime
+beyond a proxy restart:
+
+```bash
+cd deploy/community
+./tinymrp.sh set-certificate /path/to/new-server.crt /path/to/new-server.key
+```
+
+It validates the new pair first, keeps the old one beside it, restarts only
+Caddy, and confirms the certificate on the wire is the new one. `check-install.sh`
+warns once a certificate has fewer than 30 days left, so a scheduled run of it
+is the cheapest expiry alarm you can have.
+
 #### Rolling back
 
 The previous image is still on the host, so a rollback is a version swap:

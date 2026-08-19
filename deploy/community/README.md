@@ -76,8 +76,14 @@ rule after showing exactly what it will do.
 
 Linux uses `./tinymrp.sh COMMAND`; Windows uses
 `.\tinymrp.ps1 COMMAND`. Supported commands are `start`, `stop`, `status`,
-`logs`, `reconfigure`, `update`, `backup`, `restore`, and `uninstall`. Run a
-command without its required arguments to see its usage.
+`logs`, `reconfigure`, `set-certificate`, `update`, `backup`, `restore`, and
+`uninstall`. Run a command without its required arguments to see its usage.
+
+`set-certificate` installs or replaces the TLS certificate Caddy serves in
+domain mode, for organisations whose own CA is already trusted on staff
+machines. It validates the pair before touching the running proxy and
+confirms afterwards that the certificate on the wire is the one supplied;
+`set-certificate --automatic` returns to a certificate Caddy obtains itself.
 
 `./check-install.sh` is a separate read-only diagnostic: it changes nothing and
 reports PASS/WARN/FAIL for addressing consistency, container health, real

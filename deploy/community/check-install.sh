@@ -16,6 +16,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 ENV_FILE="$SCRIPT_DIR/.env"
 COMPOSE_FILE="$SCRIPT_DIR/compose.yaml"
 BACKUP_ROOT="$SCRIPT_DIR/backups"
+# shellcheck source=deploy/community/lib-tls.sh
+. "$SCRIPT_DIR/lib-tls.sh"
 
 QUIET=0
 [[ "${1:-}" != "--quiet" ]] || QUIET=1
@@ -77,6 +79,7 @@ origins="$(env_get TINYMRP_ALLOWED_ORIGINS)"
 hops="$(env_get TINYMRP_TRUSTED_PROXY_HOPS)"
 domain="$(env_get TINYMRP_DOMAIN)"
 deliverables="$(env_get DELIVERABLES_PATH)"
+tls_mode="$(env_get TINYMRP_TLS_MODE)"; tls_mode="${tls_mode:-automatic}"
 version="$(env_get TINYMRP_VERSION)"
 note "Access mode: $mode    Version: $version"
 note "Address:     $url"
@@ -235,17 +238,76 @@ if [[ "$mode" == "domain" ]]; then
     && pass "Caddy serves the app over HTTPS on 443" \
     || fail "HTTPS through Caddy returned HTTP $code. Look at: ./tinymrp.sh logs"
 
-  issuer="$(echo | openssl s_client -connect 127.0.0.1:443 -servername "$domain" 2>/dev/null | openssl x509 -noout -issuer 2>/dev/null || true)"
-  if [[ "$issuer" == *"Caddy Local Authority"* ]]; then
-    pass "Certificate is from Caddy's internal authority (expected for an internal-only domain)"
-    note "Browsers and the SolidWorks add-in distrust it until the root certificate is installed."
-    note "Export it with:  docker compose --env-file .env -f compose.yaml \\"
-    note "                   cp caddy:/data/caddy/pki/authorities/local/root.crt ./tinymrp-root-ca.crt"
-  elif [[ -n "$issuer" ]]; then
-    pass "Certificate is from a public authority (${issuer#issuer=})"
-  else
-    warn "Could not read the TLS certificate on 443"
-  fi
+  # What Caddy actually serves, checked against what is configured. Guessing
+  # from the issuer string alone was wrong: an organisation's own CA is not
+  # "Caddy Local Authority", and reporting it as a public authority was
+  # actively misleading.
+  served="$(echo | openssl s_client -connect 127.0.0.1:443 -servername "$domain" 2>/dev/null || true)"
+  issuer="$(printf '%s' "$served" | openssl x509 -noout -issuer 2>/dev/null || true)"
+  served_fp="$(printf '%s' "$served" | openssl x509 -noout -fingerprint -sha256 2>/dev/null | sed 's/.*=//' || true)"
+  cert_file="$(tls_certs_dir "$SCRIPT_DIR")/server.crt"
+  key_file="$(tls_certs_dir "$SCRIPT_DIR")/server.key"
+
+  case "$tls_mode" in
+    provided)
+      if [[ ! -f "$cert_file" ]]; then
+        fail "TINYMRP_TLS_MODE=provided but $cert_file is missing. Reinstall it: ./tinymrp.sh set-certificate <cert> <key>"
+      else
+        pass "Serving an organisation-provided certificate (not Caddy's own authority)"
+        note "$(openssl x509 -in "$cert_file" -noout -issuer 2>/dev/null | sed 's/^issuer=/Issued by: /')"
+        # SAN, because browsers and .NET stopped reading the Common Name years ago.
+        if tls_cert_matches_domain "$cert_file" "$domain"; then
+          pass "Certificate covers $domain"
+        else
+          fail "Certificate does NOT cover $domain (it covers: $(tls_cert_dns_names "$cert_file" | paste -sd', ' -)). Clients will reject it."
+        fi
+        days="$(tls_cert_days_remaining "$cert_file")"
+        if [[ -z "$days" ]]; then
+          warn "Could not read the certificate expiry date"
+        elif (( days <= 0 )); then
+          fail "Certificate expired $(( -days )) day(s) ago. Replace it: ./tinymrp.sh set-certificate <cert> <key>"
+        elif (( days < 30 )); then
+          warn "Certificate expires in $days day(s). Ask IT for the next one now."
+        else
+          pass "Certificate valid for another $days day(s)"
+        fi
+        if [[ -f "$key_file" ]]; then
+          [[ "$(tls_cert_pubkey_fingerprint "$cert_file")" == "$(tls_key_pubkey_fingerprint "$key_file")" ]] \
+            && pass "Certificate and private key match" \
+            || fail "The installed certificate and private key do not match. Reinstall both: ./tinymrp.sh set-certificate <cert> <key>"
+        else
+          fail "$key_file is missing, so Caddy cannot serve the certificate"
+        fi
+        # The claim that matters: the file on disk is the one on the wire.
+        file_fp="$(tls_cert_sha256_fingerprint "$cert_file")"
+        if [[ -z "$served_fp" ]]; then
+          warn "Could not read the certificate being served on 443"
+        elif [[ "$served_fp" == "$file_fp" ]]; then
+          pass "The certificate on the wire is the configured one"
+        else
+          fail "Caddy is serving a DIFFERENT certificate from the configured file. Restart it: ./tinymrp.sh set-certificate $cert_file $key_file"
+        fi
+      fi
+      ;;
+    *)
+      if [[ "$issuer" == *"Caddy Local Authority"* ]]; then
+        pass "Certificate is from Caddy's own authority (expected for an internal-only domain)"
+        note "Browsers and the SolidWorks add-in distrust it until that root is installed on"
+        note "every client. If your organisation already has its own CA, prefer:"
+        note "  ./tinymrp.sh set-certificate <cert> <key>"
+        note "Otherwise export the root with:  docker compose --env-file .env -f compose.yaml \\"
+        note "                   cp caddy:/data/caddy/pki/authorities/local/root.crt ./tinymrp-root-ca.crt"
+      elif [[ -n "$issuer" ]]; then
+        # Reachable when someone installed a certificate by hand rather than
+        # through set-certificate, so .env still says automatic.
+        warn "Serving a certificate from ${issuer#issuer=}, but TINYMRP_TLS_MODE is '$tls_mode'."
+        note "If this is your organisation's certificate, register it so updates and"
+        note "reconfigure keep it: ./tinymrp.sh set-certificate <cert> <key>"
+      else
+        warn "Could not read the TLS certificate on 443"
+      fi
+      ;;
+  esac
 fi
 
 # --------------------------------------------------------------------- backups

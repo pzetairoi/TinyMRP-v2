@@ -304,7 +304,13 @@ def test_the_installer_warns_that_an_internal_domain_is_not_publicly_trusted():
     """
     text = _read("deploy/community/install.sh")
     assert "is_internal_domain" in text
-    assert "*.local" in text, "the internal-domain test no longer covers .local"
+    # The classifier itself lives in lib-tls.sh so that the installer,
+    # tinymrp.sh and check-install.sh cannot disagree about what is internal.
+    shared = _read("deploy/community/lib-tls.sh")
+    assert "*.local" in shared, "the internal-domain test no longer covers .local"
+    assert "tls_is_internal_domain" in text, (
+        "install.sh no longer uses the shared internal-domain classifier"
+    )
     assert "root.crt" in text, (
         "the installer never tells an internal-domain operator how to export "
         "the root certificate their clients must trust"
@@ -432,3 +438,143 @@ def test_the_file_share_recipe_carries_the_options_that_matter_at_boot():
     assert "only changes what Linux *displays*" in text, (
         "the FAQ no longer warns that uid=1000 does not grant write permission"
     )
+
+
+# --------------------------------------------------------------------------
+# Organisation-provided TLS certificates
+# --------------------------------------------------------------------------
+
+
+def test_caddy_can_serve_a_certificate_the_operator_supplies():
+    """A LAN deployment behind a company CA must not be forced onto Caddy's own.
+
+    Caddy could previously only obtain a certificate itself: Let's Encrypt for
+    a public name, its own authority for an internal one. Organisations that
+    already push an internal root CA to every workstation then had to
+    distribute a second, unknown authority - or hand-edit the Caddyfile and
+    lose it on the next update.
+    """
+    caddyfile = _read("deploy/community/Caddyfile")
+    assert "import /etc/caddy/certs/" in caddyfile, (
+        "Caddyfile no longer imports the optional TLS snippet, so a supplied "
+        "certificate cannot be served"
+    )
+    compose = _read("deploy/community/compose.yaml")
+    assert "./certs:/etc/caddy/certs:ro" in compose, (
+        "the certs directory is not mounted into Caddy, so any certificate "
+        "written there is invisible to it"
+    )
+
+
+def test_the_certificate_directory_is_never_committed():
+    """A private key in git is a private key on every clone."""
+    ignored = _read(".gitignore")
+    assert "deploy/community/certs/*" in ignored
+    for leaked in ("deploy/community/certs/server.key", "deploy/community/certs/server.crt"):
+        assert not (REPO_ROOT / leaked).exists() or leaked in ignored
+
+
+@pytest.mark.parametrize(
+    "script,marker",
+    [
+        ("deploy/community/lib-tls.sh", "tls_validate_pair"),
+        ("deploy/community/lib-tls.ps1", "function Test-TlsPair"),
+    ],
+)
+def test_a_certificate_is_validated_before_it_is_installed(script, marker):
+    """Each refusal here is a mistake someone actually makes.
+
+    Handing over the CA root instead of the server certificate is the most
+    common by far: it is the file people have to hand, it looks right, and it
+    can never work because a root carries no hostname.
+    """
+    text = _read(script)
+    assert marker in text
+    for concept in ("CA:TRUE", "CertificateAuthority"):
+        if concept in text:
+            break
+    else:
+        pytest.fail(f"{script} does not refuse a CA certificate passed as a server certificate")
+    assert "Subject Alternative Name" in text, (
+        f"{script} does not require a SAN; browsers ignore the Common Name, so "
+        f"a CN-only certificate fails on every client"
+    )
+    assert "passphrase" in text.lower(), (
+        f"{script} accepts an encrypted key, which would make Caddy prompt for "
+        f"a passphrase it can never be given and fail every restart"
+    )
+
+
+def test_the_certificate_can_be_replaced_after_installation():
+    """Certificates expire; reinstalling the server is not a renewal process."""
+    sh = _read("deploy/community/tinymrp.sh")
+    assert "set-certificate)" in sh, "tinymrp.sh does not dispatch set-certificate"
+    assert "set_certificate()" in sh
+    assert "--automatic" in sh, "there is no way back to an automatic certificate"
+    ps = _read("deploy/community/tinymrp.ps1")
+    assert "'set-certificate'" in ps and "function Set-Certificate" in ps
+
+
+def test_reconfigure_does_not_silently_keep_a_certificate_for_another_host():
+    """Changing the domain invalidates the certificate installed for the old one."""
+    text = _read("deploy/community/tinymrp.sh")
+    assert "tls_cert_matches_domain" in text, (
+        "reconfigure does not re-check the installed certificate against the "
+        "new domain, so it could serve one that every client rejects"
+    )
+
+
+def test_the_diagnostic_does_not_call_a_private_ca_a_public_one():
+    """It used to report any non-Caddy issuer as a public authority.
+
+    With an organisation's own CA that reads as reassurance where none is due.
+    """
+    text = _read("deploy/community/check-install.sh")
+    assert "TINYMRP_TLS_MODE" in text, "check-install.sh is not aware of the TLS mode"
+    assert "organisation-provided certificate" in text
+    assert "tls_cert_matches_domain" in text, "it does not verify the SAN covers the domain"
+    assert "on the wire is the configured one" in text, (
+        "it does not compare the served certificate with the configured file, "
+        "so a stale certificate would go unreported"
+    )
+
+
+def test_the_tls_help_separates_docker_from_bare_metal():
+    """install-server.sh --cert/--key is the nginx path and does nothing on Docker.
+
+    Presenting it as "your organisation's internal CA" with no qualification
+    sent a Docker operator down a path that could not work.
+    """
+    text = _read("docs/deployment/08-networking-and-tls.md")
+    assert "Which installer are you running?" in text, (
+        "08-networking-and-tls.md no longer tells the reader which options "
+        "apply to their install"
+    )
+    assert "set-certificate" in text, "the Docker route to a supplied certificate is undocumented"
+    assert "bare-metal nginx path only" in text or "bare metal" in text
+    # The old hand-edited Caddyfile snippet taught people to do the one thing
+    # that gets silently reverted by the next update.
+    assert "tls internal\n    reverse_proxy 127.0.0.1:5000" not in text
+
+
+# --------------------------------------------------------------------------
+# The add-in must not infer plaintext for an internal deployment
+# --------------------------------------------------------------------------
+
+
+def test_addin_does_not_downgrade_internal_hostnames_to_http():
+    """`BackendUrl=mrp.company.local` used to become http://, token and all.
+
+    Internal names were treated as development hosts, so a configured API token
+    crossed the LAN in clear text. A Caddy 80->443 redirect does not save it:
+    the first request has already been built and sent.
+    """
+    text = _read("solidworks-addin/TinyMRP.SolidWorksAddin/Services/NumberingApiClient.cs")
+    start = text.index("private static bool IsDevelopmentHost")
+    body = text[start:start + 2000]
+    for downgraded in ('.EndsWith(".local"', '.EndsWith(".localdomain"', '.EndsWith(".test"'):
+        assert downgraded not in body, (
+            f"IsDevelopmentHost still treats {downgraded} as a development host, "
+            f"so an API token would be sent over plaintext HTTP"
+        )
+    assert '.localhost' in body, "loopback names should still allow implicit http"

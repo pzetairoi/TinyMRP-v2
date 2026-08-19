@@ -196,9 +196,26 @@ Internal-only means any name ending in `.local`, `.localdomain`, `.internal`,
 `.intranet`, `.lan`, `.test`, `.invalid`, `.home.arpa`, or a bare hostname with
 no dots. `mrp.mycompany.local` is internal. `mrp.mycompany.com` is public.
 
-Neither option is a downgrade: both give you real HTTPS. The internal one just
-needs one extra step, described in
-[Trusting an internal certificate](#trusting-an-internal-certificate) below.
+### Three ways to get a certificate
+
+In domain mode the installer asks which one you want. **If your organisation
+already runs its own CA — the usual case in a company with managed Windows
+machines — choose the first.** It is the only option that needs nothing
+installed on workstations afterwards.
+
+| | Where the certificate comes from | Clients need | Needs internet |
+| --- | --- | --- | --- |
+| **Your organisation's** | IT issues one for this hostname from your internal CA | nothing — your root CA is already trusted on managed machines | no |
+| **Let's Encrypt** | obtained automatically, public names only | nothing | yes, plus public DNS and inbound 80 |
+| **Caddy's own authority** | generated on first start, internal names only | its root certificate installed on every machine | no |
+
+All three are real HTTPS. The difference is entirely about who already trusts
+the signer.
+
+Choosing your organisation's certificate means having two files ready before
+you start — see [Using your organisation's certificate](#using-your-organisations-certificate).
+If you do not have them yet, install with the automatic option and switch later
+with one command; nothing has to be reinstalled.
 
 ---
 
@@ -242,10 +259,24 @@ Administrator email [admin@example.com]: daniel@yourcompany.com
 Administrator password (14+ characters): ********************
 Domain users will type (DNS or hosts file must point here) [tinymrp.example.com]: mrp.mycompany.local
 
-NOTE: mrp.mycompany.local is an internal-only name, so no public certificate
-authority can issue for it. Caddy will generate its own certificate instead.
-...
+Which TLS certificate should TinyMRP serve?
+  1) One your organisation issued.
+  2) Let TinyMRP obtain one automatically.
+
+Certificate [1]: 1
+Certificate file (.crt/.pem, include intermediates) [...]: /etc/ssl/tinymrp/server.crt
+Private key file (.key) [...]: /etc/ssl/tinymrp/server.key
+
+Checking the certificate...
+  Subject : CN=mrp.mycompany.local
+  Issuer  : CN=MYCOMPANY Corporate Root CA
+  Valid   : 824 day(s) remaining
+  Names   : mrp.mycompany.local
 ```
+
+Answer `2` there and Caddy obtains a certificate itself — from Let's Encrypt for
+a public name, from its own authority for an internal one, with a note
+explaining what each means for clients.
 
 Then it:
 
@@ -457,6 +488,7 @@ All from `deploy/community/` (or the extracted bundle):
 ./tinymrp.sh start                        # start again
 ./tinymrp.sh reconfigure                  # change address, port or access mode
 ./check-install.sh                        # verify the whole setup, changes nothing
+./tinymrp.sh set-certificate <crt> <key> # install or renew a TLS certificate
 ./tinymrp.sh backup                       # verified Mongo dump + config
 ./tinymrp.sh backup --include-deliverables
 ./tinymrp.sh restore backups/2026-08-14T02-00-00Z
@@ -527,13 +559,61 @@ If you installed from a release bundle instead, updates are version-pinned:
 `./tinymrp.sh update v2.1.0`. Full detail, including rollback, is in
 [10 — Backups, updates and uninstall](10-operations.md#update).
 
+### Using your organisation's certificate
+
+Ask IT for a certificate issued for the TinyMRP hostname, plus its private key.
+What you need from them:
+
+| | Requirement | Why |
+| --- | --- | --- |
+| Format | PEM — text starting `-----BEGIN CERTIFICATE-----` | Caddy reads PEM. A `.pfx`/`.p12` must be converted first |
+| Hostname | in the **SAN**, e.g. `DNS:mrp.mycompany.local` | browsers and .NET stopped reading the Common Name years ago |
+| Chain | server certificate first, then any intermediates, in one file | clients cannot build the chain otherwise. The root itself is not served |
+| Key | **not** passphrase-protected | Caddy restarts unattended and cannot be prompted |
+
+Converting a `.pfx` if that is what you were given:
+
+```bash
+openssl pkcs12 -in cert.pfx -clcerts -nokeys -out server.crt
+openssl pkcs12 -in cert.pfx -nocerts -nodes  -out server.key
+```
+
+The installer asks for both paths in domain mode. To install or replace them
+afterwards — a renewal, or a certificate that arrived after the install:
+
+```bash
+cd deploy/community
+./tinymrp.sh set-certificate /path/to/server.crt /path/to/server.key
+```
+
+It validates before touching anything running, then swaps the certificate in,
+restarts only the proxy, and confirms that what is on the wire is what you
+supplied. The previous certificate is kept beside it. Refusals you may see, all
+of which mean the file is wrong rather than TinyMRP:
+
+| Message | What happened |
+| --- | --- |
+| `is a certificate authority certificate, not a server certificate` | You passed the CA root. That is the file clients trust; Caddy needs the one issued **for the hostname** |
+| `is not valid for <domain>` | The certificate's SAN covers different names |
+| `has no Subject Alternative Name` | CN-only certificate; every modern client rejects it |
+| `do not belong together` | Certificate and key are from different requests |
+| `is passphrase-protected` | Ask for an unencrypted key |
+
+To go back to an automatic certificate: `./tinymrp.sh set-certificate --automatic`.
+
+No ACME request is made in this mode, so it works with no internet access.
+
 ### Trusting an internal certificate
 
-Only needed when your domain is an internal-only name such as
-`mrp.mycompany.local`. Caddy signs it with an authority it generates on first
-start, so the encryption is real but no client trusts the signer yet. Until you
-do this, browsers show *"your connection is not private"* and the SolidWorks
-add-in refuses to connect.
+Only needed when you chose an automatic certificate for an internal-only name
+such as `mrp.mycompany.local`. Caddy signs it with an authority it generates on
+first start, so the encryption is real but no client trusts the signer yet.
+Until you do this, browsers show *"your connection is not private"* and the
+SolidWorks add-in refuses to connect.
+
+> If your organisation has its own CA that is already trusted on staff
+> machines, [use its certificate instead](#using-your-organisations-certificate)
+> and skip this entirely — there is nothing to distribute.
 
 Export the root certificate once, from the server:
 

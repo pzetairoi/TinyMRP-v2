@@ -1,0 +1,4 @@
+# Organisation-provided TLS certificates live here.
+# The installer writes server.crt, server.key and tls.caddy into this
+# directory; all three are git-ignored. The directory itself is tracked so
+# that the Caddy bind mount has something to mount in a fresh clone.

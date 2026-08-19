@@ -215,7 +215,7 @@ jobs:
             echo "TINYMRP_IMAGE_REPOSITORY=$repository"
             echo "TINYMRP_VERSION=$GITHUB_REF_NAME"
           } >"bundle/$name/release.env"
-          chmod +x "bundle/$name/install.sh" "bundle/$name/tinymrp.sh"
+          chmod +x "bundle/$name/install.sh" "bundle/$name/tinymrp.sh" "bundle/$name/check-install.sh"
           tar -C bundle -czf "$name.tar.gz" "$name"
           (cd bundle && zip -qr "../$name.zip" "$name")
           echo "name=$name" >>"$GITHUB_OUTPUT"

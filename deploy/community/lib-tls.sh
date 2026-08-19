@@ -1,0 +1,184 @@
+# shellcheck shell=bash
+# Certificate handling shared by install.sh, tinymrp.sh and check-install.sh.
+#
+# TinyMRP Community terminates TLS at Caddy. Caddy can obtain a certificate by
+# itself in two situations - a public name gets one from Let's Encrypt, an
+# internal name gets one from Caddy's own authority - and in both cases every
+# client has to end up trusting the issuer. Organisations that already run an
+# internal CA and already push its root to every workstation do not want a
+# second, unknown authority: they want to hand over the certificate their CA
+# issued. That is TLS mode "provided", and this file is what validates and
+# installs it.
+#
+# Sourced, never executed. Callers must define die().
+
+# Where the installed certificate and the Caddy snippet that references it
+# live. The whole directory is mounted read-only into the Caddy container at
+# /etc/caddy/certs, and Caddyfile does `import /etc/caddy/certs/*.caddy`.
+# An empty directory imports nothing, which is exactly the automatic-TLS case.
+tls_certs_dir() { printf '%s' "${1:?}/certs"; }
+
+# A name no public certificate authority will ever issue for. Kept identical in
+# install.sh and tinymrp.sh; this is the single definition.
+tls_is_internal_domain() {
+  local d="${1,,}"
+  case "$d" in
+    *.local|*.localdomain|*.localhost|*.internal|*.intranet|*.lan|*.home.arpa|*.test|*.invalid|*.example) return 0 ;;
+    *.example.com|*.example.org|*.example.net) return 0 ;;
+    *.*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+tls_need_openssl() {
+  command -v openssl >/dev/null 2>&1 || die "openssl is required to validate a certificate."
+}
+
+# Public key fingerprint of a certificate, and of a private key. Equal means
+# the two belong together. Comparing these is the only reliable check; file
+# names and directory layout prove nothing.
+tls_cert_pubkey_fingerprint() {
+  openssl x509 -in "$1" -pubkey -noout 2>/dev/null | openssl sha256 2>/dev/null | awk '{print $NF}'
+}
+tls_key_pubkey_fingerprint() {
+  openssl pkey -in "$1" -pubout 2>/dev/null | openssl sha256 2>/dev/null | awk '{print $NF}'
+}
+
+tls_cert_sha256_fingerprint() {
+  openssl x509 -in "$1" -noout -fingerprint -sha256 2>/dev/null | sed 's/.*=//'
+}
+
+# Every DNS name the certificate is valid for: the SAN list, which is what
+# browsers and .NET actually read. CN alone has been ignored by browsers for
+# years, so a certificate with only a CN is a real failure, not a warning.
+tls_cert_dns_names() {
+  openssl x509 -in "$1" -noout -ext subjectAltName 2>/dev/null \
+    | tr ',' '\n' | sed -n 's/.*DNS:\([^,[:space:]]*\).*/\1/p' | tr -d ' '
+}
+
+tls_cert_matches_domain() {
+  local cert="$1" domain="${2,,}" name
+  while read -r name; do
+    [[ -n "$name" ]] || continue
+    name="${name,,}"
+    [[ "$name" != "$domain" ]] || return 0
+    # One level of wildcard, as the RFC allows: *.example.com covers a.example.com
+    if [[ "$name" == \*.* && "$domain" == *.* ]]; then
+      [[ "${name#\*.}" != "${domain#*.}" ]] || return 0
+    fi
+  done < <(tls_cert_dns_names "$cert")
+  return 1
+}
+
+tls_cert_days_remaining() {
+  local end epoch now
+  end="$(openssl x509 -in "$1" -noout -enddate 2>/dev/null | cut -d= -f2)"
+  [[ -n "$end" ]] || { printf '%s' ''; return; }
+  epoch="$(date -d "$end" +%s 2>/dev/null || printf '')"
+  [[ -n "$epoch" ]] || { printf '%s' ''; return; }
+  now="$(date +%s)"
+  printf '%d' $(( (epoch - now) / 86400 ))
+}
+
+# Refuse everything Caddy would choke on later, plus the two mistakes people
+# actually make: handing over the CA root instead of the server certificate,
+# and handing over a certificate for a different hostname.
+#
+#   tls_validate_pair <cert> <key> <domain>
+tls_validate_pair() {
+  local cert="$1" key="$2" domain="$3" cert_fp key_fp days names
+  tls_need_openssl
+
+  [[ -f "$cert" ]] || die "Certificate file not found: $cert"
+  [[ -r "$cert" ]] || die "Certificate file is not readable: $cert"
+  [[ -f "$key" ]] || die "Private key file not found: $key"
+  [[ -r "$key" ]] || die "Private key file is not readable: $key"
+
+  openssl x509 -in "$cert" -noout >/dev/null 2>&1 || die \
+    "$cert is not a PEM certificate. It should begin with -----BEGIN CERTIFICATE-----.
+If your CA gave you a .pfx or .p12, convert it first:
+  openssl pkcs12 -in cert.pfx -clcerts -nokeys -out server.crt
+  openssl pkcs12 -in cert.pfx -nocerts -nodes  -out server.key"
+
+  # An encrypted key would make Caddy prompt for a passphrase it can never be
+  # given, so the container would fail to start on every reboot.
+  if grep -q "ENCRYPTED" "$key" 2>/dev/null; then
+    die "$key is passphrase-protected. Caddy runs unattended and cannot be prompted.
+Ask for an unencrypted key, or strip the passphrase:
+  openssl rsa -in $key -out server-nopass.key"
+  fi
+  openssl pkey -in "$key" -noout >/dev/null 2>&1 || die \
+    "$key is not a readable PEM private key. It should begin with -----BEGIN PRIVATE KEY----- or -----BEGIN RSA PRIVATE KEY-----."
+
+  # The mistake this catches: passing the CA root certificate as the server
+  # certificate. It is the file people have most readily to hand, it looks
+  # right, and it can never work - a root has no hostname in it.
+  if openssl x509 -in "$cert" -noout -text 2>/dev/null | grep -q "CA:TRUE"; then
+    die "$cert is a certificate authority certificate, not a server certificate.
+This is the CA that signs certificates; it is the file you install on client
+machines so they trust the server. What Caddy needs here is the certificate
+your CA issued FOR ${domain}, together with its private key."
+  fi
+
+  cert_fp="$(tls_cert_pubkey_fingerprint "$cert")"
+  key_fp="$(tls_key_pubkey_fingerprint "$key")"
+  [[ -n "$cert_fp" && -n "$key_fp" ]] || die "Could not read the public key from the certificate or the key."
+  [[ "$cert_fp" == "$key_fp" ]] || die \
+    "The certificate and the private key do not belong together - their public keys differ.
+Check you have not mixed up files from two different requests."
+
+  names="$(tls_cert_dns_names "$cert" | paste -sd', ' -)"
+  if [[ -z "$names" ]]; then
+    die "$cert has no Subject Alternative Name.
+Browsers and the SolidWorks add-in have ignored the Common Name for years, so a
+certificate without a SAN is rejected by every client. Ask your CA to reissue it
+with  DNS:${domain}  in the SAN."
+  fi
+  tls_cert_matches_domain "$cert" "$domain" || die \
+    "$cert is not valid for ${domain}.
+It covers: ${names}
+Either reissue it with DNS:${domain} in the SAN, or install with the domain it
+actually covers."
+
+  days="$(tls_cert_days_remaining "$cert")"
+  if [[ -n "$days" ]]; then
+    (( days > 0 )) || die "$cert expired $(( -days )) day(s) ago. Ask for a current one."
+  fi
+  printf '%s' "$days"
+}
+
+# Copy a validated pair into place and write the Caddy snippet that points at
+# it. Caddy reads these as root inside its container; on the host the key stays
+# unreadable to anyone but its owner.
+#
+#   tls_install_provided <script_dir> <cert> <key>
+tls_install_provided() {
+  local script_dir="$1" cert="$2" key="$3" dir
+  dir="$(tls_certs_dir "$script_dir")"
+  mkdir -p "$dir"
+  chmod 755 "$dir"          # Caddy reads the snippet; the key is protected by its own mode
+  install -m 644 "$cert" "$dir/server.crt"
+  install -m 600 "$key" "$dir/server.key"
+  printf 'tls /etc/caddy/certs/server.crt /etc/caddy/certs/server.key\n' >"$dir/tls.caddy"
+  chmod 644 "$dir/tls.caddy"
+}
+
+# Return to Caddy obtaining its own certificate. Removing the snippet is what
+# switches modes; the old certificate files are removed with it so a later
+# check cannot report a certificate that is no longer being served.
+tls_install_automatic() {
+  local dir
+  dir="$(tls_certs_dir "$1")"
+  mkdir -p "$dir"
+  rm -f "$dir/tls.caddy" "$dir/server.crt" "$dir/server.key"
+}
+
+# Human-readable summary, used by the installer and by check-install.sh.
+tls_describe_cert() {
+  local cert="$1" days
+  days="$(tls_cert_days_remaining "$cert")"
+  printf '  Subject : %s\n' "$(openssl x509 -in "$cert" -noout -subject 2>/dev/null | sed 's/^subject=//')"
+  printf '  Issuer  : %s\n' "$(openssl x509 -in "$cert" -noout -issuer 2>/dev/null | sed 's/^issuer=//')"
+  printf '  Valid   : %s day(s) remaining\n' "${days:-unknown}"
+  printf '  Names   : %s\n' "$(tls_cert_dns_names "$cert" | paste -sd', ' -)"
+}

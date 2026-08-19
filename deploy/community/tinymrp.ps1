@@ -5,7 +5,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('start', 'stop', 'status', 'logs', 'reconfigure', 'update', 'backup', 'restore', 'uninstall')]
+    [ValidateSet('start', 'stop', 'status', 'logs', 'reconfigure', 'set-certificate', 'update', 'backup', 'restore', 'uninstall')]
     [string]$Command,
     [Parameter(Position = 1)]
     [string]$Argument,
@@ -36,7 +36,7 @@ if ($extraArguments -contains '--delete-data') { $DeleteData = $true }
 if ($extraArguments -contains '--yes') { $Yes = $true }
 # A positional argument that was really a flag must not be mistaken for a
 # backup directory or a version tag.
-if ($Argument -and $Argument.StartsWith('--')) { $Argument = '' }
+if ($Argument -and $Argument.StartsWith('--') -and $Command -ne 'set-certificate') { $Argument = '' }
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $EnvFile = Join-Path $ScriptDir '.env'
@@ -47,6 +47,8 @@ $MinimumDumpBytes = 1024L
 function Stop-WithError([string]$Message) {
     throw $Message
 }
+
+. (Join-Path $ScriptDir 'lib-tls.ps1')
 
 function Assert-Installed {
     if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) {
@@ -136,16 +138,8 @@ function Test-Port([int]$Number) {
     return $null -ne (Get-NetTCPConnection -State Listen -LocalPort $Number -ErrorAction SilentlyContinue | Select-Object -First 1)
 }
 
-# Kept in step with is_internal_domain() in install.sh / tinymrp.sh.
-function Test-InternalDomain([string]$Domain) {
-    $d = $Domain.ToLowerInvariant()
-    foreach ($suffix in @('.local', '.localdomain', '.localhost', '.internal', '.intranet',
-                          '.lan', '.home.arpa', '.test', '.invalid', '.example',
-                          '.example.com', '.example.org', '.example.net')) {
-        if ($d.EndsWith($suffix)) { return $true }
-    }
-    return (-not $d.Contains('.'))
-}
+# Defined once, in lib-tls.ps1, so this script and the installer cannot drift.
+function Test-InternalDomain([string]$Domain) { return Test-TlsInternalDomain $Domain }
 
 # Eight keys in .env describe one decision: how browsers reach this server.
 # They have to agree, and the failure when they do not is a silent login loop
@@ -227,6 +221,74 @@ function Invoke-Reconfigure {
         Write-Host '    cp caddy:/data/caddy/pki/authorities/local/root.crt .\tinymrp-root-ca.crt'
         Write-Host ''
         Write-Host '  Windows  certutil -addstore -f Root tinymrp-root-ca.crt   (as Administrator)'
+    }
+}
+
+function Set-Certificate([string]$CertPath, [string]$KeyPath) {
+    Assert-Installed; Assert-Runtime
+    $mode = Get-EnvValue 'ACCESS_MODE'
+    $domain = Get-EnvValue 'TINYMRP_DOMAIN'
+    if ($mode -ne 'domain') { Stop-WithError "Certificates only apply in domain mode; this instance is in '$mode' mode. Switch first with: .	inymrp.ps1 reconfigure" }
+    if (-not $domain) { Stop-WithError 'TINYMRP_DOMAIN is empty. Run .	inymrp.ps1 reconfigure first.' }
+
+    if ($CertPath -eq '--automatic' -or $CertPath -eq '-Automatic') {
+        Install-TlsAutomatic $ScriptDir
+        Set-EnvValue 'TINYMRP_TLS_MODE' 'automatic'
+        Write-Host "Switched $domain back to an automatically obtained certificate."
+        if (Test-TlsInternalDomain $domain) {
+            Write-Host 'It is an internal-only name, so Caddy will sign it with its own authority'
+            Write-Host 'and clients will distrust it until you install that root certificate.'
+        }
+    } else {
+        if (-not $CertPath -or -not $KeyPath) {
+            Stop-WithError "Usage: .	inymrp.ps1 set-certificate <certificate-file> <private-key-file>`n       .	inymrp.ps1 set-certificate --automatic"
+        }
+        Write-Host "Checking the certificate against $domain..."
+        $days = Test-TlsPair $CertPath $KeyPath $domain
+        Show-TlsCert (Read-TlsCertificate $CertPath)
+        # Back up first: a bad swap on a live instance is otherwise unrecoverable
+        # without going back to IT for the previous files.
+        $dir = Get-TlsCertsDir $ScriptDir
+        $existing = Join-Path $dir 'server.crt'
+        if (Test-Path -LiteralPath $existing) {
+            $backup = Join-Path $dir ("previous-" + (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ'))
+            New-Item -ItemType Directory -Force -Path $backup | Out-Null
+            Copy-Item -LiteralPath $existing -Destination $backup -Force -ErrorAction SilentlyContinue
+            Copy-Item -LiteralPath (Join-Path $dir 'server.key') -Destination $backup -Force -ErrorAction SilentlyContinue
+            Write-Host "Previous certificate kept in $backup"
+        }
+        Install-TlsProvided $ScriptDir $CertPath $KeyPath
+        Set-EnvValue 'TINYMRP_TLS_MODE' 'provided'
+        if ($days -lt 30) { Write-Host "WARNING: this certificate expires in $days day(s)." }
+    }
+
+    Write-Host 'Restarting the proxy...'
+    try {
+        Invoke-Compose --profile domain up -d --no-deps --force-recreate --wait caddy | Out-Null
+    } catch {
+        Stop-WithError "Caddy did not come back up. Inspect: .	inymrp.ps1 logs`nThe previous certificate files, if any, are still in $(Get-TlsCertsDir $ScriptDir)."
+    }
+
+    # Proving it: a mismatched key would have stopped Caddy, and comparing the
+    # served certificate with the file is what confirms the swap took effect.
+    if ($CertPath -ne '--automatic' -and $CertPath -ne '-Automatic') {
+        $onDisk = Read-TlsCertificate $CertPath
+        Start-Sleep -Seconds 2
+        $served = $null
+        try {
+            $client = New-Object System.Net.Sockets.TcpClient('127.0.0.1', 443)
+            $ssl = New-Object System.Net.Security.SslStream($client.GetStream(), $false, { $true })
+            $ssl.AuthenticateAsClient($domain)
+            $served = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 $ssl.RemoteCertificate
+            $ssl.Dispose(); $client.Close()
+        } catch { $served = $null }
+        if ($served -and $served.Thumbprint -eq $onDisk.Thumbprint) {
+            Write-Host "`nVerified: $domain is now serving your certificate."
+        } else {
+            Write-Warning 'Could not confirm the served certificate matches the file. Check with: bash ./check-install.sh'
+        }
+    } else {
+        Write-Host "`n$domain is serving an automatically obtained certificate again."
     }
 }
 
@@ -470,6 +532,7 @@ switch ($Command) {
     'stop' { Assert-Runtime; Invoke-Compose --profile domain stop }
     'status' { Assert-Runtime; Invoke-Compose --profile domain ps }
     'reconfigure' { Assert-Runtime; Invoke-Reconfigure }
+    'set-certificate' { Set-Certificate $Argument $Option }
     'logs' { Assert-Runtime; Invoke-Compose --profile domain logs --tail $(if ($Argument) { $Argument } else { '200' }) -f app mongo redis caddy }
     'backup' { Backup-Stack ([bool]$IncludeDeliverables) }
     'restore' { Restore-Stack $Argument ([bool]$IncludeDeliverables) ([bool]$Yes) }
@@ -485,5 +548,5 @@ switch ($Command) {
             Write-Host 'Application removed. Mongo data, configuration, backups, and deliverables were preserved.'
         }
     }
-    default { Stop-WithError 'Usage: .\tinymrp.ps1 {start|stop|status|logs|reconfigure|backup|restore|update|uninstall}' }
+    default { Stop-WithError 'Usage: .\tinymrp.ps1 {start|stop|status|logs|reconfigure|set-certificate|backup|restore|update|uninstall}' }
 }

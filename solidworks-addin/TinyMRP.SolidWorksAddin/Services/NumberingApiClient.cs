@@ -467,11 +467,18 @@ namespace TinyMRP.SolidWorksAddin.Services
                 return true;
             }
 
-            return normalized.EndsWith(".local", StringComparison.Ordinal)
-                || normalized.EndsWith(".localdomain", StringComparison.Ordinal)
-                || normalized.EndsWith(".localhost", StringComparison.Ordinal)
-                || normalized.EndsWith(".test", StringComparison.Ordinal)
-                || normalized.EndsWith(".test.local", StringComparison.Ordinal);
+            // Only genuine loopback gets an implicit http://. This used to
+            // include .local, .localdomain, .test and .test.local, on the
+            // assumption that such names are always development machines. They
+            // are not: an internal company deployment at mrp.company.local is
+            // an ordinary production server reached over the LAN, and the
+            // add-in sends an API token on every request. Inferring http://
+            // for it put that token on the wire in clear text, and a Caddy
+            // 80->443 redirect does not help because the first request has
+            // already been built and sent.
+            //
+            // .localhost stays: RFC 6761 reserves it to resolve to loopback.
+            return normalized.EndsWith(".localhost", StringComparison.Ordinal);
         }
 
         private static string NormalizeApiBasePath(string path)

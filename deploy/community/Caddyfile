@@ -4,6 +4,13 @@
 }
 
 {$TINYMRP_DOMAIN} {
+	# Organisation-provided certificate, when there is one. The installer
+	# writes certs/tls.caddy holding a `tls <cert> <key>` line, and Caddy
+	# then serves exactly that instead of obtaining its own. With no such
+	# file the glob matches nothing, which is valid config and leaves
+	# automatic TLS in charge: Let's Encrypt for a public name, Caddy's
+	# own authority for an internal one.
+	import /etc/caddy/certs/*.caddy
 	encode zstd gzip
 	reverse_proxy app:8000 {
 		# The app already marks its cookies Secure in this mode: the installer

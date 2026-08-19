@@ -204,9 +204,61 @@ on `Any` profile follows the laptop to the coffee shop.
 ## Adding HTTPS to a LAN deployment
 
 Plain HTTP on a trusted LAN is supported, and for many workshops it is the
-right trade. If you want TLS without a public domain, there are three ways.
+right trade. If you want TLS without a public domain, there are several ways.
 
-### Option A — a real certificate for an internal name (best)
+> **Which installer are you running?** The commands below are not
+> interchangeable, and picking one from the wrong section is a wasted
+> afternoon.
+>
+> | You installed with | TLS is terminated by | Use |
+> | --- | --- | --- |
+> | `deploy/community/install.sh` (Docker, recommended) | **Caddy**, in a container | [Option A — your organisation's certificate, Docker](#option-a--your-organisations-certificate-docker) |
+> | `deploy/scripts/install-server.sh` (bare metal, no Docker) | **nginx**, on the host | [Option D — your organisation's certificate, bare metal](#option-d--your-organisations-certificate-bare-metal) |
+>
+> `install-server.sh` and its `--cert`/`--key` flags belong to the bare-metal
+> nginx path only. They do nothing on a Docker install.
+
+### Option A — your organisation's certificate, Docker
+
+The usual answer for a company LAN, and the one that needs nothing installed on
+workstations: if your domain already pushes an internal root CA to every
+machine through Group Policy or Intune, ask IT for a certificate for the
+TinyMRP hostname and hand it to the installer.
+
+At install time, `install.sh` asks for it in domain mode. Afterwards, or when
+the certificate is renewed:
+
+```bash
+cd deploy/community
+./tinymrp.sh set-certificate /path/server.crt /path/server.key
+```
+
+It checks the certificate before touching the running proxy — that it is a
+server certificate and not the CA root, that its SAN covers the hostname, that
+the key matches it and is not passphrase-protected, and that it has not expired
+— then swaps it in, restarts Caddy, and confirms the certificate on the wire is
+the one you supplied. The previous one is kept alongside it.
+
+Requirements for the file IT gives you:
+
+- **PEM format.** Text beginning `-----BEGIN CERTIFICATE-----`. A `.pfx`/`.p12`
+  must be converted first:
+  ```bash
+  openssl pkcs12 -in cert.pfx -clcerts -nokeys -out server.crt
+  openssl pkcs12 -in cert.pfx -nocerts -nodes  -out server.key
+  ```
+- **The hostname in the SAN**, not only the Common Name. Browsers and .NET have
+  ignored the CN for years, so a CN-only certificate fails everywhere.
+- **Intermediates included**, if your CA uses them: concatenate the server
+  certificate first, then each intermediate, into one file. The root itself
+  does not need to be served.
+- **An unencrypted key.** Caddy restarts unattended and cannot be asked for a
+  passphrase.
+
+No ACME request is made in this mode, so it works on a network with no internet
+access at all.
+
+### Option B — a real certificate for an internal name
 
 If you own `example.com`, create `tinymrp.internal.example.com` as a **public**
 DNS record pointing at a **private** IP, and use a DNS-01 ACME challenge. The
@@ -220,10 +272,34 @@ TINYMRP_URL=https://tinymrp.internal.example.com
 TINYMRP_TRUSTED_PROXY_HOPS=1
 ```
 
-### Option B — your organisation's internal CA
+### Option C — Caddy's own authority (Docker, no certificate to hand)
 
-If your domain already pushes an internal root CA to workstations, issue a
-certificate for the host and terminate TLS at nginx:
+What a Docker install does by itself when the hostname is internal-only. It
+needs no CA, no internet and no paperwork, and it is real encryption — but the
+signer is unknown to everyone, so **every** browser warns and the SolidWorks
+add-in refuses to connect until its root certificate is installed on each
+machine. Prefer Option A whenever your organisation has its own CA.
+
+Export the root once, from the server:
+
+```bash
+cd deploy/community
+docker compose --env-file .env -f compose.yaml \
+  cp caddy:/data/caddy/pki/authorities/local/root.crt ./tinymrp-root-ca.crt
+```
+
+Then distribute `tinymrp-root-ca.crt` to clients — Group Policy or Intune for a
+managed fleet, otherwise per machine. The per-OS commands are in
+[01 — VM / server with Docker](01-vm-docker.md#trusting-an-internal-certificate).
+
+Nothing needs editing by hand: the installer and `./tinymrp.sh set-certificate`
+write the Caddy configuration for you.
+
+### Option D — your organisation's certificate, bare metal
+
+**For `deploy/scripts/install-server.sh` only** — the systemd + gunicorn +
+nginx path, with no Docker. On a Docker install these flags do nothing; use
+[Option A](#option-a--your-organisations-certificate-docker) instead.
 
 ```bash
 sudo ./deploy/scripts/install-server.sh \
@@ -233,29 +309,20 @@ sudo ./deploy/scripts/install-server.sh \
   --url  https://tinymrp.corp.local
 ```
 
-### Option C — a self-signed certificate
+The certificate requirements are the same as Option A: PEM, the hostname in the
+SAN, intermediates concatenated, and an unencrypted key.
+
+### Option E — a self-signed certificate (bare metal)
 
 Works, but every browser shows a warning until the certificate is installed as
 trusted on every client — including the machines running the SolidWorks add-in,
-which will otherwise refuse the connection.
+which will otherwise refuse the connection. On Docker, Option C is the
+equivalent and is handled for you.
 
 ```bash
 sudo ./deploy/scripts/install-server.sh --domain tinymrp.lan --self-signed \
   --url https://tinymrp.lan
 ```
-
-For the container stack, put Caddy in front with its internal CA:
-
-```caddyfile
-tinymrp.lan {
-    tls internal
-    reverse_proxy 127.0.0.1:5000
-}
-```
-
-and set `TINYMRP_URL=https://tinymrp.lan`, `TINYMRP_TRUSTED_PROXY_HOPS=1`,
-`APP_BIND_IP=127.0.0.1`. Then trust Caddy's root on each client
-(`caddy trust`, or export `/data/caddy/pki/authorities/local/root.crt`).
 
 ### What not to do
 

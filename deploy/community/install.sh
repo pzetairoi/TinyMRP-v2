@@ -6,6 +6,8 @@ ENV_FILE="$SCRIPT_DIR/.env"
 # Present only when this script runs from a git checkout rather than from an
 # extracted release bundle. --build needs it; nothing else does.
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." 2>/dev/null && pwd -P || true)"
+# shellcheck source=deploy/community/lib-tls.sh
+. "$SCRIPT_DIR/lib-tls.sh"
 
 usage() {
   cat <<'EOF'
@@ -24,9 +26,17 @@ Options:
                     one demo login per role, and print those passwords once.
                     Evaluation instances only.
 
+In domain mode it also asks which TLS certificate to serve: one your
+organisation issued for this hostname, or one Caddy obtains by itself. Use the
+first whenever your company CA is already trusted on staff machines - nothing
+then has to be installed on workstations. It can also be set or replaced later
+with ./tinymrp.sh set-certificate.
+
 Non-interactive use sets TINYMRP_NON_INTERACTIVE=1 plus
 TINYMRP_DELIVERABLES_PATH, TINYMRP_ADMIN_EMAIL, TINYMRP_ADMIN_PASSWORD, and
-for lan/domain modes TINYMRP_LAN_HOST or TINYMRP_DOMAIN + ACME_EMAIL.
+for lan/domain modes TINYMRP_LAN_HOST or TINYMRP_DOMAIN. A public domain also
+needs ACME_EMAIL. To supply a certificate, set TINYMRP_TLS_CERT and
+TINYMRP_TLS_KEY to PEM file paths.
 See docs/deployment/01-vm-docker.md for the full walkthrough.
 EOF
 }
@@ -54,22 +64,9 @@ prompt() {
   printf '%s' "${value:-$default}"
 }
 
-# A name no public certificate authority will ever issue for. Caddy detects
-# these itself and quietly signs them with its own CA instead of asking
-# Let's Encrypt. That works, but every browser then shows a warning until the
-# CA is trusted, so detect the same set and say it out loud.
-is_internal_domain() {
-  local d="${1,,}"
-  case "$d" in
-    *.local|*.localdomain|*.localhost|*.internal|*.intranet|*.lan|*.home.arpa|*.test|*.invalid|*.example) return 0 ;;
-    # RFC 2606 documentation names. These resolve, so ACME would be attempted
-    # and would fail; treat the prompt default as internal rather than let an
-    # unedited answer walk into a certificate error.
-    *.example.com|*.example.org|*.example.net) return 0 ;;
-    *.*) return 1 ;;
-    *) return 0 ;;
-  esac
-}
+# Defined once, in lib-tls.sh, so the installer, tinymrp.sh and
+# check-install.sh cannot drift apart about what counts as internal.
+is_internal_domain() { tls_is_internal_domain "$@"; }
 
 explain_access_modes() {
   cat <<'MODES'
@@ -205,6 +202,10 @@ url="$origin"
 # Caddy in front, which overwrites them.
 proxy_hops=0
 internal_tls=0
+tls_mode=automatic
+tls_cert_path=""
+tls_key_path=""
+cert_days=""
 if [[ "$mode" == "lan" ]]; then
   bind_ip=0.0.0.0
   if [[ "${TINYMRP_NON_INTERACTIVE:-0}" == "1" ]]; then
@@ -220,12 +221,65 @@ elif [[ "$mode" == "domain" ]]; then
   port_in_use 443 && die "TCP port 443 is already in use."
   if [[ "${TINYMRP_NON_INTERACTIVE:-0}" == "1" ]]; then
     domain="${TINYMRP_DOMAIN:?TINYMRP_DOMAIN is required for non-interactive domain mode}"
-    acme_email="${ACME_EMAIL:?ACME_EMAIL is required for non-interactive domain mode}"
+    # ACME_EMAIL is only meaningful when Caddy is going to talk to Let's
+    # Encrypt. With an organisation-supplied certificate, or an internal-only
+    # name, no ACME request is ever made, so demanding an address for expiry
+    # notices that will never be sent just blocks the install.
+    if [[ -z "${TINYMRP_TLS_CERT:-}" ]] && ! tls_is_internal_domain "$domain"; then
+      acme_email="${ACME_EMAIL:?ACME_EMAIL is required for a public domain, for certificate expiry notices}"
+    fi
   else
     domain="$(prompt 'Domain users will type (DNS or hosts file must point here)' 'tinymrp.example.com')"
   fi
   acme_email="${acme_email:-${ACME_EMAIL:-$admin_email}}"
-  if is_internal_domain "$domain"; then
+
+  # Ask before describing what automatic TLS would do, because an organisation
+  # that already runs its own CA does not care: their root is already on every
+  # workstation, and a second unknown authority is the problem, not the fix.
+  if [[ "${TINYMRP_NON_INTERACTIVE:-0}" == "1" ]]; then
+    tls_cert_path="${TINYMRP_TLS_CERT:-}"
+    tls_key_path="${TINYMRP_TLS_KEY:-}"
+    [[ -z "$tls_cert_path" ]] || tls_mode=provided
+  else
+    cat <<'TLSMODE'
+
+Which TLS certificate should TinyMRP serve?
+
+  1) One your organisation issued.
+     Choose this if IT can give you a certificate file and its private key for
+     this hostname, and your company's root CA is already trusted on staff
+     machines (pushed by Group Policy or Intune). Nothing to install on
+     workstations afterwards, and no browser warnings.
+
+  2) Let TinyMRP obtain one automatically.
+     A public hostname gets a real certificate from Let's Encrypt, which needs
+     working internet access and public DNS. An internal-only hostname gets one
+     from Caddy's own authority, which works offline but is trusted by nobody
+     until you install its root certificate on every machine yourself.
+
+TLSMODE
+    if [[ "$(prompt 'Certificate' '1')" == "1" ]]; then
+      tls_mode=provided
+      printf '\nPaths to the files IT gave you. Both must be PEM (text starting\n'
+      printf -- '-----BEGIN ...). A .pfx/.p12 has to be converted first; the installer\n'
+      printf 'prints the command if you point it at one.\n\n'
+      tls_cert_path="$(prompt 'Certificate file (.crt/.pem, include intermediates)' '/etc/ssl/tinymrp/server.crt')"
+      tls_key_path="$(prompt 'Private key file (.key)' '/etc/ssl/tinymrp/server.key')"
+    fi
+  fi
+
+  if [[ "$tls_mode" == "provided" ]]; then
+    [[ -n "${tls_key_path:-}" ]] || die "A private key is required alongside the certificate (TINYMRP_TLS_KEY)."
+    printf '\nChecking the certificate...\n'
+    cert_days="$(tls_validate_pair "$tls_cert_path" "$tls_key_path" "$domain")"
+    tls_describe_cert "$tls_cert_path"
+    if [[ -n "$cert_days" ]] && (( cert_days < 30 )); then
+      printf '\nWARNING: this certificate expires in %s day(s). Replace it with\n' "$cert_days"
+      printf './tinymrp.sh set-certificate when IT issues the next one.\n'
+    fi
+    printf '\nThis certificate will be served for %s. Clients already trusting\n' "$domain"
+    printf 'your organisation CA need nothing installed.\n\n'
+  elif is_internal_domain "$domain"; then
     # No public CA can issue for a name like this, so Caddy signs it with its
     # own. That is a working, encrypted install - but not a trusted one until
     # the root certificate reaches every client, and learning that from a
@@ -294,7 +348,16 @@ write_env_value BACKUP_MAX_TOTAL_GB 10
 write_env_value TINYMRP_DOMAIN "$domain"
 write_env_value ACME_EMAIL "$acme_email"
 write_env_value CADDY_BIND_IP 0.0.0.0
+# Recorded so tinymrp.sh and check-install.sh know which of the three TLS
+# situations this instance is in without having to guess from a certificate.
+write_env_value TINYMRP_TLS_MODE "$tls_mode"
 chmod 600 "$ENV_FILE"
+
+if [[ "$tls_mode" == "provided" ]]; then
+  tls_install_provided "$SCRIPT_DIR" "$tls_cert_path" "$tls_key_path"
+else
+  tls_install_automatic "$SCRIPT_DIR"
+fi
 
 cleanup_on_error() {
   status=$?
@@ -353,7 +416,15 @@ if [[ -n "$demo_output" ]]; then
   printf '  docker compose --env-file %s -f %s exec -T app flask --app run.py demo remove --disable\n' \
     "$ENV_FILE" "$SCRIPT_DIR/compose.yaml"
 fi
-if [[ "$internal_tls" == "1" ]]; then
+if [[ "$tls_mode" == "provided" ]]; then
+  printf "
+%s is served with your organisation's certificate. Machines that
+" "$domain"
+  printf 'already trust your CA need nothing installed.
+'
+  printf 'Replace it later with:  %s/tinymrp.sh set-certificate <cert> <key>
+' "$SCRIPT_DIR"
+elif [[ "$internal_tls" == "1" ]]; then
   printf "\n%s uses a certificate from Caddy's own authority. Export the root\n" "$domain"
   printf 'certificate once:\n\n'
   printf '  docker compose --env-file %s \\\n' "$ENV_FILE"

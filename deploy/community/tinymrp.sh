@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 ENV_FILE="$SCRIPT_DIR/.env"
 COMPOSE_FILE="$SCRIPT_DIR/compose.yaml"
 BACKUP_ROOT="$SCRIPT_DIR/backups"
+# shellcheck source=deploy/community/lib-tls.sh
+. "$SCRIPT_DIR/lib-tls.sh"
 MIN_DUMP_BYTES=1024
 
 die() {
@@ -100,16 +102,77 @@ port_in_use() {
   fi
 }
 
-# Kept identical to install.sh: a name no public CA will issue for, which Caddy
-# signs with its own authority instead.
-is_internal_domain() {
-  local d="${1,,}"
-  case "$d" in
-    *.local|*.localdomain|*.localhost|*.internal|*.intranet|*.lan|*.home.arpa|*.test|*.invalid|*.example) return 0 ;;
-    *.example.com|*.example.org|*.example.net) return 0 ;;
-    *.*) return 1 ;;
-    *) return 0 ;;
-  esac
+# Defined once, in lib-tls.sh, so this script and the installer cannot drift
+# apart about what counts as an internal name.
+is_internal_domain() { tls_is_internal_domain "$@"; }
+
+# Install or replace the certificate Caddy serves, after installation.
+# Certificates expire, organisations re-issue them, and an instance that can
+# only be given one at install time would have to be reinstalled every year.
+#
+#   ./tinymrp.sh set-certificate <cert> <key>   serve an organisation certificate
+#   ./tinymrp.sh set-certificate --automatic    go back to Caddy obtaining one
+set_certificate() {
+  local cert="${1:-}" key="${2:-}" domain mode days served_fp file_fp
+  require_install
+  require_runtime
+  mode="$(env_get ACCESS_MODE)"
+  domain="$(env_get TINYMRP_DOMAIN)"
+  [[ "$mode" == "domain" ]] || die "Certificates only apply in domain mode; this instance is in '$mode' mode.
+Switch first with:  ./tinymrp.sh reconfigure"
+  [[ -n "$domain" ]] || die "TINYMRP_DOMAIN is empty. Run ./tinymrp.sh reconfigure first."
+
+  if [[ "$cert" == "--automatic" ]]; then
+    tls_install_automatic "$SCRIPT_DIR"
+    env_set TINYMRP_TLS_MODE automatic
+    printf 'Switched %s back to an automatically obtained certificate.\n' "$domain"
+    if is_internal_domain "$domain"; then
+      printf 'It is an internal-only name, so Caddy will sign it with its own authority\n'
+      printf 'and clients will distrust it until you install that root certificate.\n'
+    fi
+  else
+    [[ -n "$cert" && -n "$key" ]] || die "Usage: ./tinymrp.sh set-certificate <certificate-file> <private-key-file>
+       ./tinymrp.sh set-certificate --automatic"
+    printf 'Checking the certificate against %s...\n' "$domain"
+    days="$(tls_validate_pair "$cert" "$key" "$domain")"
+    tls_describe_cert "$cert"
+    # Backing up first: a bad swap on a live instance is otherwise unrecoverable
+    # without going back to IT for the previous files.
+    local dir backup
+    dir="$(tls_certs_dir "$SCRIPT_DIR")"
+    if [[ -f "$dir/server.crt" ]]; then
+      backup="$dir/previous-$(date -u +%Y%m%dT%H%M%SZ)"
+      mkdir -p "$backup" && chmod 700 "$backup"
+      cp -p "$dir/server.crt" "$backup/" 2>/dev/null || true
+      cp -p "$dir/server.key" "$backup/" 2>/dev/null || true
+      printf 'Previous certificate kept in %s\n' "$backup"
+    fi
+    tls_install_provided "$SCRIPT_DIR" "$cert" "$key"
+    env_set TINYMRP_TLS_MODE provided
+    if [[ -n "$days" ]] && (( days < 30 )); then
+      printf 'WARNING: this certificate expires in %s day(s).\n' "$days"
+    fi
+  fi
+
+  printf 'Restarting the proxy...\n'
+  compose --profile domain up -d --no-deps --force-recreate --wait caddy >/dev/null 2>&1 || \
+    die "Caddy did not come back up. Inspect: ./tinymrp.sh logs
+The previous certificate files, if any, are still in $(tls_certs_dir "$SCRIPT_DIR")."
+
+  # Proving it: what Caddy actually serves, not what we put on disk.
+  served_fp="$(echo | openssl s_client -connect 127.0.0.1:443 -servername "$domain" 2>/dev/null \
+    | openssl x509 -noout -fingerprint -sha256 2>/dev/null | sed 's/.*=//')"
+  if [[ "$cert" != "--automatic" ]]; then
+    file_fp="$(tls_cert_sha256_fingerprint "$cert")"
+    if [[ -n "$served_fp" && "$served_fp" == "$file_fp" ]]; then
+      printf '\nVerified: %s is now serving your certificate.\n' "$domain"
+    else
+      printf '\nWARNING: could not confirm the served certificate matches the file.\n' >&2
+      printf 'Check with: ./check-install.sh\n' >&2
+    fi
+  else
+    printf '\n%s is serving an automatically obtained certificate again.\n' "$domain"
+  fi
 }
 
 # Eight keys in .env describe one decision: how browsers reach this server.
@@ -192,7 +255,36 @@ MODES
   profile_up --wait
   wait_for_app || die "Reconfigured to $url but TinyMRP did not become healthy; see ./tinymrp.sh logs."
   printf '\nTinyMRP is now at %s\n' "$url"
-  if [[ "$mode" == "domain" ]] && is_internal_domain "$domain"; then
+  if [[ "$mode" != "domain" ]]; then
+    # Leaving domain mode: the certificate no longer applies. Keep the files
+    # (they may be reinstated) but stop referencing them, so a later return to
+    # domain mode does not resurrect a certificate for the wrong hostname.
+    [[ "$(env_get TINYMRP_TLS_MODE)" != "provided" ]] || tls_install_automatic "$SCRIPT_DIR"
+    env_set TINYMRP_TLS_MODE automatic
+  elif [[ "$(env_get TINYMRP_TLS_MODE)" == "provided" ]]; then
+    local certfile
+    certfile="$(tls_certs_dir "$SCRIPT_DIR")/server.crt"
+    if [[ -f "$certfile" ]] && tls_cert_matches_domain "$certfile" "$domain"; then
+      printf '
+Keeping your organisation certificate; it is valid for %s.
+' "$domain"
+    else
+      # The domain changed out from under the certificate. Serving it anyway
+      # would give every client a name-mismatch error, which is worse than
+      # falling back, so say so plainly rather than deciding silently.
+      tls_install_automatic "$SCRIPT_DIR"
+      env_set TINYMRP_TLS_MODE automatic
+      printf '
+NOTE: the installed certificate is not valid for %s, so it was not
+' "$domain"
+      printf 'kept. Caddy will obtain one itself for now. Install the right one with:
+'
+      printf '  ./tinymrp.sh set-certificate <cert> <key>
+'
+    fi
+  fi
+
+  if [[ "$mode" == "domain" ]] && [[ "$(env_get TINYMRP_TLS_MODE)" != "provided" ]] && is_internal_domain "$domain"; then
     printf '\n%s is an internal-only name, so Caddy signs it with its own\n' "$domain"
     printf 'authority. Export the root certificate and trust it on every client:\n\n'
     printf '  docker compose --env-file %s \\\n' "$ENV_FILE"
@@ -471,11 +563,12 @@ main() {
     status) require_install; require_runtime; compose --profile domain ps ;;
     logs) require_install; require_runtime; compose --profile domain logs --tail "${2:-200}" -f app mongo redis caddy ;;
     reconfigure) shift; reconfigure "$@" ;;
+    set-certificate) shift; set_certificate "$@" ;;
     backup) shift; backup "$@" ;;
     restore) shift; restore "$@" ;;
     update) shift; update_app "$@" ;;
     uninstall) shift; uninstall_stack "$@" ;;
-    *) die "Usage: ./tinymrp.sh {start|stop|status|logs|reconfigure|backup|restore|update|uninstall}" ;;
+    *) die "Usage: ./tinymrp.sh {start|stop|status|logs|reconfigure|set-certificate|backup|restore|update|uninstall}" ;;
   esac
 }
 

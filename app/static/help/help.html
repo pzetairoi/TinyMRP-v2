@@ -2015,12 +2015,22 @@ actually accept. Run any of them with <code>--help</code> or <code>Get-Help</cod
 <tr>
 <td><code>install.ps1</code></td>
 <td>Guided TinyMRP Community install on Windows Docker Desktop (app + MongoDB + Redis).</td>
-<td><code>-DeliverablesPath</code>, <code>-AccessMode</code>, <code>-Address</code>, <code>-Port</code>, <code>-AdminEmail</code>, <code>-AdministratorPassword</code>, <code>-ImageRepository</code>, <code>-Version</code>, <code>-Build</code>, <code>-WithDemoData</code></td>
+<td><code>-DeliverablesPath</code>, <code>-AccessMode</code>, <code>-Address</code>, <code>-Port</code>, <code>-AdminEmail</code>, <code>-AdministratorPassword</code>, <code>-ImageRepository</code>, <code>-Version</code>, <code>-Build</code>, <code>-WithDemoData</code>, <code>-TlsCert</code>, <code>-TlsKey</code>, <code>-NonInteractive</code></td>
 </tr>
 <tr>
 <td><code>install.sh</code></td>
 <td>./install.sh [--build] [--with-demo-data] [--help]</td>
 <td><code>--build</code>, <code>--with-demo-data</code></td>
+</tr>
+<tr>
+<td><code>lib-tls.ps1</code></td>
+<td>Certificate handling shared by install.ps1 and tinymrp.ps1.</td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>lib-tls.sh</code></td>
+<td>Certificate handling shared by install.sh, tinymrp.sh and check-install.sh.</td>
+<td>-</td>
 </tr>
 <tr>
 <td><code>tinymrp.ps1</code></td>
