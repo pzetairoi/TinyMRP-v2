@@ -156,11 +156,29 @@ tls_install_provided() {
   local script_dir="$1" cert="$2" key="$3" dir
   dir="$(tls_certs_dir "$script_dir")"
   mkdir -p "$dir"
-  chmod 755 "$dir"          # Caddy reads the snippet; the key is protected by its own mode
+  chmod 755 "$dir"
+  # Replace rather than overwrite: after the chown below these files belong to
+  # root, and the unprivileged user running the installer can unlink them (the
+  # directory is theirs) but not write through them.
+  rm -f "$dir/server.crt" "$dir/server.key" "$dir/tls.caddy"
   install -m 644 "$cert" "$dir/server.crt"
   install -m 600 "$key" "$dir/server.key"
   printf 'tls /etc/caddy/certs/server.crt /etc/caddy/certs/server.key\n' >"$dir/tls.caddy"
   chmod 644 "$dir/tls.caddy"
+
+  # The key must stay unreadable to other users on the host, and still be
+  # readable by Caddy. Caddy runs as root in its container, but `cap_drop: ALL`
+  # takes CAP_DAC_OVERRIDE with it - the capability that normally lets root
+  # ignore file modes - so a 0600 key owned by the installing user is simply
+  # "permission denied" to it. Giving the files to uid 0 lets Caddy read the
+  # key by ownership, with no capability and no world-readable private key.
+  # The same throwaway-container trick the installer uses for the deliverables
+  # folder, so this needs no sudo.
+  if command -v docker >/dev/null 2>&1 && [[ "$(stat -c %u "$dir/server.key" 2>/dev/null || echo 0)" != "0" ]]; then
+    docker run --rm -v "$dir:/certs" alpine:3.23 \
+      chown 0:0 /certs/server.crt /certs/server.key /certs/tls.caddy >/dev/null 2>&1 || \
+      printf 'WARNING: could not give the certificate files to root; Caddy may not be able to read the key.\n' >&2
+  fi
 }
 
 # Return to Caddy obtaining its own certificate. Removing the snippet is what
@@ -170,6 +188,8 @@ tls_install_automatic() {
   local dir
   dir="$(tls_certs_dir "$1")"
   mkdir -p "$dir"
+  # These may be root-owned (see tls_install_provided). Unlinking them only
+  # needs write permission on the directory, which the installing user has.
   rm -f "$dir/tls.caddy" "$dir/server.crt" "$dir/server.key"
 }
 
