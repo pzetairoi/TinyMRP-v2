@@ -1,8 +1,18 @@
-# TinyMRP — Standalone Linux Server (tier T2: nginx + gunicorn, no containers)
+# TinyMRP — Standalone Linux Server (nginx + gunicorn, no containers)
+
+**The step-by-step guide is
+[`docs/deployment/02-linux-bare-metal.md`](../../docs/deployment/02-linux-bare-metal.md).**
+It covers prerequisites, every installer option, first login, backups and a
+symptom-first troubleshooting table. This page is the operational summary and
+the inventory of the configuration files shipped in this directory.
 
 Hardened single-host deployment for production. Two equivalent paths: scripted (recommended)
 or manual. Both end with: gunicorn on localhost:8000 (systemd, sandboxed), nginx terminating
 TLS with rate limiting and security headers, MongoDB local-only, strict security mode.
+
+Choose this path only when Docker is not permitted. Otherwise
+[`docs/deployment/01-vm-docker.md`](../../docs/deployment/01-vm-docker.md) is
+simpler and is the recommended one.
 
 ## Scripted install (recommended)
 
@@ -16,8 +26,12 @@ sudo ./deploy/scripts/install-server.sh \
 
 Certificate variants: `--certbot` (public host, Let's Encrypt), `--self-signed` (lab/VPN),
 `--cert <fullchain> --key <privkey>` (internal CA), `--http-only` (LAN pilots only).
-Other options: `--deliverables <dir>`, `--mongo-uri <uri>` (external MongoDB), `--compat`,
-`--skip-ufw`. Re-running is safe: existing env, certs and data are preserved.
+Other options: `--deliverables <dir>`, `--mongo-uri <uri>` (external MongoDB),
+`--skip-ufw`, `--with-fail2ban`, `--yes`. Re-running is safe: existing env, certs
+and data are preserved.
+
+`--compat` no longer exists. There is one security model, and the installer
+rejects the flag rather than ignoring it.
 
 For an empty user database, the script prints a one-time administrator password
 at the end; change it after first login. Re-running against an existing user

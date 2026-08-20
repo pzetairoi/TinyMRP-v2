@@ -378,9 +378,21 @@ Rate limits are keyed by client address, so they are only meaningful if
 | `FLAT_PATTERN_PAGE_NAMES` | `flatpattern` | Drawing page labels dropped from binders. |
 | `PROCESS_META_FILE` | bundled | Override the process metadata catalogue. |
 | `ARENA_FILE_LINK_BASE_URL` | empty | Base URL for deep links into Arena PLM. |
+| `BRANDING_LOGO_MAX_BYTES` | `2097152` | Largest branding logo accepted by **Admin → Settings** (PNG/SVG), in bytes. |
 
 Each of these is also editable from **Admin → Settings**, and the stored value
 wins over the environment.
+
+---
+
+## Development only
+
+Read by the frontend build, never by the server. Irrelevant to a deployed
+instance.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `VITE_BACKEND_URL` | `http://localhost:5000` | Backend the Vite dev server proxies to during `npm run dev`. See [09 — Local development](09-local-development.md). |
 
 ---
 

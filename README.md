@@ -34,41 +34,26 @@ Original project: pzetairoi/TinyMRP. This v2 rebuilds the stack (Flask + MongoDB
 
 ## Configuration
 
-Create a local `.env` (do not commit it) or select one via `ENV_FILE` with at least:
+Three settings decide whether a deployment works; everything else has a working
+default or is generated for you.
 
-- `SECRET_KEY`: Flask secret.
-- `SECURITY_PASSWORD_SALT`: salt for Flask-Security.
-- `MONGO_URI`: e.g. `mongodb://localhost:27017/tinymrp-v2`.
-- File roots (canonical keys, see `app/__init__.py`):
-  - `FILES_LOCAL_ROOT`: absolute path where deliverables are stored (host/container).
-  - `FILES_URL_PREFIX`: URL prefix for protected files when Nginx is fronting the app (e.g. `/deliverables`).
-  - Optional `FILES_UPSTREAM_BASE`: upstream file server base URL if proxying.
-  - `FILES_PUBLIC_URLS=false`: allow direct public file URLs (off by default).
-  - `FILES_ACCEL_REDIRECT_PREFIX`: optional internal Nginx location used for `X-Accel-Redirect`; leave this empty for the guided Caddy deployment and any setup that does not create and verify a matching internal route.
-  - `FILES_ALLOW_LEGACY_TOKENS=false`: allow legacy base64 file tokens (off by default).
-- Optional:
-  - `TINYMRP_ALLOWED_ORIGINS`: comma-separated allowlist for cross-origin requests. Same-origin browser use does not require CORS.
-  - `TINYMRP_CORS_CREDENTIALS=true`: allow credentials when using an explicit allowlist.
-  - `API_TOKEN_DEFAULT_TTL_DAYS=90`: lifetime applied to newly created API tokens.
-  - `API_TOKEN_MAX_TTL_DAYS=365`: maximum lifetime users may request; must be at least the default.
-  - `TINYMRP_MAX_CONTENT_MB`: global request size cap (falls back to Upload Pack max).
-  - `FILE_HASH_MAX_BYTES`: compute/verify file hashes up to this size (0 to disable).
-  - `VITE_BACKEND_URL`: dev proxy target for Vite (`frontend/vite.config.ts`).
-  - `FORCE_HTTPS=true`: enforce HTTPS and set secure cookies.
-  - `SECURITY_HEADERS_ENABLED=true`: send CSP + security headers.
-  - `FILES_UPSTREAM_ALLOWED_HOSTS`: optional allowlist for proxy upstream hostnames.
-  - `FILES_PROXY_MAX_BYTES`: max bytes proxied from upstream file servers.
-  - `EXCEL_COMPILE_MAX_BYTES=10485760`: max upload size for Excel Compile.
-  - `UPLOAD_PACK_MAX_ZIP_MB=500`: max ZIP size for Upload Pack.
-  - `UPLOAD_PACK_MAX_FILE_MB=200`: max single file size for Upload Pack/extra uploads.
-  - `UPLOAD_PACK_MAX_FILES=5000`: max file count inside a pack.
-  - `EXTRA_FILES_ALLOWED=true`: enable/disable associated file uploads.
-  - `APP_TIMEZONE`: default timezone (IANA name) for docpack timestamps if no admin override is set.
-  - `BRANDING_LOGO_MAX_BYTES`: max logo upload size in bytes (default 2097152).
-  - `TINYMRP_SEED_ADMIN=true`: opt-in admin seeding on first boot.
-  - `TINYMRP_ADMIN_EMAIL`, `TINYMRP_ADMIN_PASSWORD`: credentials used when seeding.
+| | Setting | Example |
+| --- | --- | --- |
+| 1 | `FILES_LOCAL_ROOT` — where deliverables live | `/srv/tinymrp/deliverables` |
+| 2 | `TINYMRP_URL` — the address users type, **scheme included** | `https://mrp.example.com` |
+| 3 | `MONGO_URI` | `mongodb://localhost:27017/tinymrp-v2` |
 
-Examples: `.env.dev.example`, `.env.docker.example`, `.env.server.example`.
+`SECRET_KEY` and `SECURITY_PASSWORD_SALT` are mandatory and are generated for
+you by every installer. The application refuses to start without them rather
+than inventing its own, because a key it invented cannot tell a forged session
+from a real one after a restart.
+
+**Every variable, its default and when to change it:**
+[`docs/deployment/05-configuration-reference.md`](docs/deployment/05-configuration-reference.md).
+That page is the single source of truth — this list is deliberately not a
+second copy of it.
+
+Templates: `.env.dev.example`, `.env.docker.example`, `.env.server.example`.
 
 ---
 
@@ -123,77 +108,17 @@ API endpoints:
 
 ## SolidWorks Add-in
 
-Add-in project lives in `solidworks-addin/`.
+A task pane add-in for SolidWorks that drives publish/BOM exports, the tools,
+and part numbering. The project lives in [`solidworks-addin/`](solidworks-addin/).
 
-### Requirements
+| You want to | Read |
+| --- | --- |
+| **Install a released build** | [`docs/help/03_addin_installation.md`](docs/help/03_addin_installation.md) — the same text the app shows under Help |
+| **Build, register, configure or package it** | [`solidworks-addin/README.md`](solidworks-addin/README.md) — requirements, MSBuild, RegAsm, every `TinyMRP_config.txt` setting, the Inno Setup installer, and what Publish/BOM writes |
+| **Connect it to a server** | Create an API token at `/ui/addin/tokens`, then Configuration → Quick Start in the task pane |
 
-- SolidWorks installed (API redistributables in `$(ProgramFiles)\SOLIDWORKS Corp\SOLIDWORKS\api\redist`)
-- .NET Framework 4.8
-- Inno Setup (only if you want to build the installer)
-
-### Build
-
-```powershell
-dotnet msbuild solidworks-addin\TinyMRP.SolidWorksAddin.sln /p:Configuration=Release /p:Platform=x64
-```
-
-Output DLL:
-
-`solidworks-addin/TinyMRP.SolidWorksAddin/bin/x64/Release/net48/TinyMRP.SolidWorksAddin.dll`
-
-### Register / Unregister (manual)
-
-```powershell
-# Register
-& "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe" "C:\Path\To\TinyMRP.SolidWorksAddin.dll" /codebase /tlb
-
-# Unregister
-& "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe" "C:\Path\To\TinyMRP.SolidWorksAddin.dll" /unregister
-```
-
-### Installer
-
-The Inno Setup script is in `solidworks-addin/installer.iss`. It copies the build output and runs RegAsm.
-Silent install example:
-
-```powershell
-TinyMRP_SolidWorksAddin_*.exe /VERYSILENT /SUPPRESSMSGBOXES /BACKENDURL="http://localhost:5000" /AUTHTOKEN="tmrp_xxx"
-```
-
-### Add-in Quick Start + Tokens
-
-- Web dashboard:
-  - `/ui/admin/addin` for Quick Start + Advanced defaults.
-  - `/ui/addin/tokens` to create, rotate and revoke expiring API tokens (secrets are shown once).
-  - `/ui/admin/addin` for admins (per-token/global revocation + scheme preset flags).
-- Add-in Configuration tab has **Quick Start** (presets + minimal inputs) and **Advanced** (full defaults).
-- The add-in authenticates with a Bearer token stored in `AuthToken`.
-
-### Configuration
-
-- Primary config file: `%PROGRAMDATA%\TinyMRP\TinyMRP_config.txt`.
-- Read order: ProgramData → install folder → `%LOCALAPPDATA%\TinyMRP\TinyMRP_config.txt`.
-- If ProgramData is not writable, the add-in falls back to LocalAppData.
-- Relative paths in the config are resolved from the add-in directory.
-- Templates live under `solidworks-addin/TinyMRP.SolidWorksAddin/Templates/`.
-- Numbering settings live in `BackendUrl`, `AuthToken`, `NumberingSchemeId`, `NumberingContextDefaults`.
-- Property map and apply mode live in `PartNumberProperty`, `RevisionProperty`, `DisplayCodeProperty`, `NumberingApplyMode`.
-
-### UI and Outputs
-
-- Task pane tabs: Publish/BOM, Tools, Numbering, Configuration.
-- Publish exports deliverables under `DeliverablesFolder`.
-- BOM exports `*_FLATBOM.txt` and `*_TREEBOM.txt`, then zips them into `BOM_Folder\bom`.
-- BOM text files are written as UTF-8 **without** a BOM; the TinyMRP importer tolerates UTF-8 BOM (`utf-8-sig`) for legacy files.
-- Publish/BOM includes "Manage associated files..." and an optional "Create Upload Pack (ZIP)" toggle.
-- Child documents opened during export are closed automatically; only the root stays open.
-- Numbering tab previews and allocates `PartNumber` + `Revision` via `/api/numbering/*`, then writes custom properties.
-
-### Icons
-
-The add-in and task pane icons are generated from `solidworks-addin/TinyMRP.SolidWorksAddin/Assets/logo.png`.
-
----
+Set the backend URL **with its scheme** (`https://mrp.company.local`). Without
+one the add-in assumes HTTPS for anything that is not genuine loopback.
 
 ## Part Numbering API
 
@@ -392,32 +317,25 @@ iscc solidworks-addin\installer.iss
 
 ## Deployment
 
-Step-by-step guides for every deployment option are in
+Step-by-step guides for every option live in
 [`docs/deployment/`](docs/deployment/README.md), written to be read on GitHub
-before you have a server:
+before you have a server. **That directory is the single source of truth for
+installing TinyMRP**; the sections below cover only the developer and legacy
+paths that have no guide of their own.
 
-| Guide | Covers |
+| You have | Guide |
 | --- | --- |
-| [Choosing a path](docs/deployment/README.md) | The three settings TinyMRP actually needs |
-| [01 — VM / server with Docker](docs/deployment/01-vm-docker.md) | Recommended single instance, Linux or Windows Docker Desktop |
-| [02 — Linux bare metal](docs/deployment/02-linux-bare-metal.md) | systemd + gunicorn + nginx, no Docker |
-| [03 — Windows LAN](docs/deployment/03-windows-lan.md) | Office network, no internet exposure |
-| [04 — VPS, multiple instances](docs/deployment/04-vps-multi-instance.md) | Guided Caddy multi-tenant with automatic HTTPS |
-| [05 — Configuration reference](docs/deployment/05-configuration-reference.md) | Every environment variable |
-| [06 — First run](docs/deployment/06-first-run.md) | Administrator, roles, evaluation dataset |
-| [07 — Troubleshooting](docs/deployment/07-troubleshooting.md) | Symptom-first fixes |
-| [08 — Networking and TLS](docs/deployment/08-networking-and-tls.md) | Addresses, firewalls, HTTPS on a LAN |
-| [09 — Local development](docs/deployment/09-local-development.md) | Running from a checkout |
-| [10 — Operations](docs/deployment/10-operations.md) | Backups, updates, uninstall |
-| [11 — FAQ](docs/deployment/11-faq.md) | Common questions, including "other machines cannot reach it" |
-| [12 — Windows, restricted](docs/deployment/12-restricted-windows-flask.md) | Locked-down host running `python run.py` |
+| A Linux VM or server with Docker — **recommended** | [01 — VM / server with Docker](docs/deployment/01-vm-docker.md) |
+| Anything else — bare metal, Windows LAN, restricted Windows, multi-instance VPS, local dev | [Choosing a path](docs/deployment/README.md) |
 
 Only three things need configuring: the deliverables folder, the address users
 type (`TINYMRP_URL`, **scheme included**), and optionally the port. Secrets,
-database credentials and the reverse-proxy configuration are generated for you.
+database credentials and reverse-proxy configuration are generated for you.
 
-Nextcloud is optional and is only available on the VPS path. Every other
-deployment ignores it entirely.
+Nextcloud is optional and exists only on the VPS path. Every other deployment
+ignores it entirely.
+
+---
 
 ## TinyMRP Community (standalone Docker)
 
@@ -531,85 +449,24 @@ docker compose up -d --force-recreate app
 
 ---
 
-## Guided Host Deployment (Ubuntu + Caddy)
+## Guided multi-instance VPS (Ubuntu + Caddy)
 
-The recommended production path is now the guided multi-instance deployment under [`deploy/README.md`](deploy/README.md).
-
-Default behavior:
-
-- Caddy is the shared reverse proxy on ports `80` and `443`.
-- Caddy obtains and renews HTTPS certificates automatically.
-- Each TinyMRP instance gets its own private Docker network and MongoDB container.
-- MongoDB is never published on the host.
-- DNS guidance and validation are built into the scripts.
-- Protected deliverables stay on the normal TinyMRP app route, so `FILES_ACCEL_REDIRECT_PREFIX` is empty by default.
-
-Typical flow:
+One shared Caddy proxy with automatic HTTPS, one isolated TinyMRP instance per
+company. Use it when a single host serves several customers.
 
 ```bash
-sudo ./deploy/scripts/install-host.sh --base-domain tinymrp.com
-sudo ./deploy/scripts/create-instance.sh company1 company1.tinymrp.com
-sudo ./deploy/scripts/install-nextcloud-instance.sh company1 cloud.company1.tinymrp.com
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --read-only --non-interactive
+sudo ./deploy/scripts/install-host.sh --acme-email ops@example.com --base-domain example.com
+sudo ./deploy/scripts/create-instance.sh company1 company1.example.com
 sudo ./deploy/scripts/doctor.sh
 ```
 
-Update and rollback commands for that deployment path live in [`deploy/README.md`](deploy/README.md):
+- Orientation and the questions each script asks:
+  [docs/deployment/04-vps-multi-instance.md](docs/deployment/04-vps-multi-instance.md)
+- Operational reference for the scripts themselves, including Nextcloud:
+  [deploy/README.md](deploy/README.md)
 
-- `sudo ./deploy/scripts/update-repo.sh`
-- `sudo ./deploy/scripts/update-instance.sh company1`
-- `sudo ./deploy/scripts/update-all-instances.sh`
-- `sudo ./deploy/scripts/rollback-instance.sh company1`
-
-Minimal operator input:
-
-- `install-host.sh`
-  - ACME email
-  - optional base domain
-- `create-instance.sh`
-  - instance name
-  - final public domain
-- `install-nextcloud-instance.sh`
-  - TinyMRP instance name
-  - final per-company Nextcloud domain
-- `install-nextcloud.sh`
-  - legacy shared/global Nextcloud domain
-- `scan-nextcloud-instance.sh`
-  - run an immediate Nextcloud rescan for one linked TinyMRP instance
-- `install-nextcloud-scan-job.sh`
-  - install or update the recurring scan job that keeps Nextcloud in sync with server-side TinyMRP imports
-- `link-nextcloud-instance.sh`
-  - deployed TinyMRP instance name
-  - optional `--nextcloud-instance <name|global>` override
-  - read-only or bidirectional access mode, unless you pass a flag
-
-Nextcloud integration stays deployment-side. The recommended multi-company path is one Nextcloud per TinyMRP company under `/srv/tinymrp/nextcloud/<instance>`. TinyMRP keeps ownership of `/srv/tinymrp/instances/<instance>/deliverables`, and `link-nextcloud-instance.sh` now defaults to the same-name Nextcloud instance while prompting for either read-only sharing mode or bidirectional sync mode. Read-only stays the safest default and mounts deliverables under `/mnt/tinymrp-deliverables/<instance>` without write access. Bidirectional mode is available for trusted internal workflows that need desktop-client uploads or sync back into the VPS deliverables folder. The link flow now also runs an immediate Nextcloud scan and installs a recurring scan job by default so TinyMRP server-side imports propagate back out to Nextcloud desktop clients by refreshing both the external storage cache and the user-visible mount paths. The default Caddy deployment continues to rely on `FILES_ACCEL_REDIRECT_PREFIX=""`.
-
-Useful commands:
-
-```bash
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1
-sudo ./deploy/scripts/install-nextcloud-instance.sh company1 cloud.company1.tinymrp.com
-sudo ./deploy/scripts/scan-nextcloud-instance.sh company1
-sudo ./deploy/scripts/install-nextcloud-scan-job.sh company1 --interval-minutes 5
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --read-only
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --bidirectional
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --read-only
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --bidirectional
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --scan-now-only --read-only --non-interactive
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --nextcloud-instance global --read-only --non-interactive
-```
-
-`--non-interactive` requires either `--read-only` or `--bidirectional`.
-
-DNS examples:
-
-- `company1.tinymrp.com` -> `A company1 <server-ip>`
-- `tinymrp.customercompany.com` -> `A tinymrp <server-ip>`
-- `customercompany.com` -> `A @ <server-ip>`
-- `cloud.tinymrp.com` -> `A cloud <server-ip>`
-
-For full DNS examples, local VM mode, and Nextcloud details, see [`deploy/README.md`](deploy/README.md).
+Nextcloud is **optional** and installed only by the scripts with `nextcloud` in
+their name.
 
 ### Legacy Single-Stack Compose Path
 
@@ -627,8 +484,13 @@ Quick notes for that legacy path:
 
 ## Frontend (React/Vite)
 
-- Build outputs to `app/static/parts-ui` (manifest included). The Flask routes under `/ui/*` read this manifest to inject JS/CSS.
-- Dev server: `npm run dev` and set `VITE_BACKEND_URL=http://localhost:5000` to proxy API requests.
+Builds into `app/static/parts-ui` (manifest included); the Flask routes under
+`/ui/*` read that manifest to inject the JS and CSS. **The compiled output is
+committed**, so deploying TinyMRP needs no Node.js — only working on the
+frontend does.
+
+Scripts, dev server and the build/commit rule:
+[`frontend/README.md`](frontend/README.md).
 
 Main UI routes:
 
@@ -721,4 +583,9 @@ Data helpers (see `app/cli.py`):
 
 ## License
 
-This repository inherits the spirit of the original TinyMRP project. Add your license here if distributing.
+[The Unlicense](LICENSE) — released into the public domain. Copy, modify,
+publish, use, compile, sell or distribute it, commercially or not, by any
+means. There is no warranty of any kind.
+
+What that means in practice, and how paid support relates to it, is in
+[docs/commercial/SERVICE_AND_SUPPORT.md](docs/commercial/SERVICE_AND_SUPPORT.md).

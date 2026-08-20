@@ -1,69 +1,38 @@
-# React + TypeScript + Vite
+# TinyMRP frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The React/Vite application behind TinyMRP's part detail, BOM and visual list
+pages. It is not a separate product and does not run on its own: `vite build`
+compiles it straight into `app/static/parts-ui/`, which Flask then serves.
 
-Currently, two official plugins are available:
+**The compiled output is committed.** Deploying TinyMRP therefore needs no
+Node.js at all — only work on the frontend itself does.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Working on it
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      ...tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      ...tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      ...tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+cd frontend
+npm install
+npm run dev      # hot reload against a Flask backend on :5000
+npm run build    # writes ../app/static/parts-ui/ — commit the result
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+| Script | Does |
+| --- | --- |
+| `npm run dev` | Vite dev server with hot module replacement |
+| `npm run build` | Production build into `../app/static/parts-ui/` |
+| `npm run lint` | ESLint over the whole package |
+| `npm test` | Vitest unit tests, once |
+| `npm run test:watch` | Vitest in watch mode |
+| `npm run test:coverage` | Vitest with coverage |
+| `npm run test:e2e` | Playwright end-to-end tests |
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Because the build is committed, a change here is only finished once
+`npm run build` has been run and `app/static/parts-ui/` is committed with it.
+Otherwise the running application keeps serving the previous bundle.
 
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+## Where the rest is
+
+- Running the whole stack from a checkout, backend included:
+  [`docs/deployment/09-local-development.md`](../docs/deployment/09-local-development.md)
+- What the pages do, from a user's point of view: the in-app Help, built from
+  [`docs/help/`](../docs/help/)

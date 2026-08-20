@@ -30,6 +30,22 @@ Release builds increment `TinyMRP.SolidWorksAddin/BuildNumber.txt` once and disp
 & "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe" "C:\Path\To\TinyMRP.SolidWorksAddin.dll" /unregister
 ```
 
+## Installer
+
+The Inno Setup script is `solidworks-addin/installer.iss`. It copies the build
+output and runs RegAsm. Silent install, for IT deployment:
+
+```powershell
+TinyMRP_SolidWorksAddin_*.exe /VERYSILENT /SUPPRESSMSGBOXES /BACKENDURL="https://mrp.company.local" /AUTHTOKEN="tmrp_xxx"
+```
+
+Add-in and task pane icons are generated from
+`TinyMRP.SolidWorksAddin/Assets/logo.png`.
+
+End users installing a released build, rather than building one, should follow
+[`docs/help/03_addin_installation.md`](../docs/help/03_addin_installation.md) —
+the same text the application shows under Help.
+
 ## Configuration
 
 - Primary config file: `%PROGRAMDATA%\TinyMRP\TinyMRP_config.txt`.
@@ -54,10 +70,20 @@ Key settings in `TinyMRP_config.txt`:
 Backend URL rules:
 
 - Correct: `https://company.example.com`
-- Correct for local/dev hosts: `http://tinymrp-lan.company.local`
+- Correct: `https://mrp.company.local` — an internal name is still HTTPS
+- Correct only where the deployment really is plain HTTP, such as the Windows
+  LAN path: `http://tinymrp-lan.company.local`
 - Wrong: `company.example.com/api`
 - Wrong: `https://company.example.com/api`
 - Wrong: `https://company.example.com/api/numbering`
+
+**Always write the scheme.** Without one the add-in has to guess, and it now
+guesses `https://` for everything except genuine loopback (`localhost`,
+`127.0.0.1`, `::1`, `*.localhost`). It previously guessed `http://` for
+`.local`, `.localdomain`, `.test` and `.test.local` on the assumption that such
+names are development machines — which put the API token on the wire in clear
+text on internal production deployments. An explicit `http://` is still
+honoured, so plain-HTTP LAN installs are unaffected.
 
 ## Task pane tabs
 
@@ -65,6 +91,21 @@ Backend URL rules:
 - Tools: freeze/unfreeze, normalize units, hide reference geometry.
 - Numbering: scheme selection, last-used number, preview, and allocate to a filename.
 - Configuration: Quick Start + Advanced settings, templates, paths, server settings.
+
+## What Publish/BOM writes
+
+- Deliverables are exported under `deliverables_folder`.
+- BOM export writes `*_FLATBOM.txt` and `*_TREEBOM.txt`, then zips them into
+  `BOM_Folder\bom`.
+- Those text files are UTF-8 **without** a byte-order mark. The TinyMRP importer
+  also tolerates UTF-8 with a BOM (`utf-8-sig`) for files produced by older
+  builds.
+- Publish/BOM includes "Manage associated files…" and an optional
+  "Create Upload Pack (ZIP)" toggle.
+- Child documents opened during export are closed again automatically; only the
+  root document stays open.
+- The Numbering tab previews and allocates `PartNumber` + `Revision` through
+  `/api/numbering/*`.
 
 ## Numbering workflow (quick)
 
