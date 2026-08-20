@@ -174,11 +174,35 @@ tls_install_provided() {
   # key by ownership, with no capability and no world-readable private key.
   # The same throwaway-container trick the installer uses for the deliverables
   # folder, so this needs no sudo.
-  if command -v docker >/dev/null 2>&1 && [[ "$(stat -c %u "$dir/server.key" 2>/dev/null || echo 0)" != "0" ]]; then
+  if command -v docker >/dev/null 2>&1; then
     docker run --rm -v "$dir:/certs" alpine:3.23 \
-      chown 0:0 /certs/server.crt /certs/server.key /certs/tls.caddy >/dev/null 2>&1 || \
-      printf 'WARNING: could not give the certificate files to root; Caddy may not be able to read the key.\n' >&2
+      chown 0:0 /certs/server.crt /certs/server.key /certs/tls.caddy >/dev/null 2>&1 || true
   fi
+
+  # Then check the thing that actually matters, the same way Caddy will: read
+  # the key from a container with no capabilities at all. Guessing from file
+  # ownership would be wrong on Windows, where bind mounts carry no Unix modes.
+  # This has to fail here, before the caller restarts the proxy - a running
+  # instance keeps serving the certificate it already loaded, so catching it now
+  # is the difference between "nothing happened" and an outage.
+  tls_assert_container_can_read "$dir"
+}
+
+# Fatal unless a capability-less container can read the installed key.
+tls_assert_container_can_read() {
+  local dir="$1"
+  command -v docker >/dev/null 2>&1 || return 0
+  docker run --rm --cap-drop ALL -v "$dir:/certs:ro" alpine:3.23 \
+    sh -c 'head -c 1 /certs/server.key >/dev/null' >/dev/null 2>&1 && return 0
+  die "Caddy will not be able to read the private key at $dir/server.key.
+
+It is stored readable only by root so that no other account on this host can
+read it, and Caddy reads it as root inside its container. Making it root-owned
+needs a one-off container that could not be run here.
+
+Nothing was restarted, so the running instance is unaffected. Fix it with:
+  sudo chown 0:0 $dir/server.crt $dir/server.key $dir/tls.caddy
+then run the same set-certificate command again."
 }
 
 # Return to Caddy obtaining its own certificate. Removing the snippet is what
