@@ -189,11 +189,24 @@ tls_install_provided() {
 }
 
 # Fatal unless a capability-less container can read the installed key.
+#
+# A probe that simply fails proves nothing on its own: the container may not
+# have run at all - no image, no daemon, or a mount path the environment
+# mangled, which is what Git Bash on Windows does to /c/... paths. So probe
+# twice. tls.caddy sits beside the key at mode 0644 and must always be
+# readable; if even that fails, the probe itself is broken and there is nothing
+# to report. Only a run that reads tls.caddy but not server.key is evidence of
+# the permission problem this guards against.
 tls_assert_container_can_read() {
   local dir="$1"
   command -v docker >/dev/null 2>&1 || return 0
   docker run --rm --cap-drop ALL -v "$dir:/certs:ro" alpine:3.23 \
     sh -c 'head -c 1 /certs/server.key >/dev/null' >/dev/null 2>&1 && return 0
+  if ! docker run --rm --cap-drop ALL -v "$dir:/certs:ro" alpine:3.23 \
+       sh -c 'head -c 1 /certs/tls.caddy >/dev/null' >/dev/null 2>&1; then
+    printf 'NOTE: could not verify key readability from a container here; continuing.\n' >&2
+    return 0
+  fi
   die "Caddy will not be able to read the private key at $dir/server.key.
 
 It is stored readable only by root so that no other account on this host can
