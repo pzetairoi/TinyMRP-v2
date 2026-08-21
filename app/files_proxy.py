@@ -2,9 +2,8 @@ import os, requests, ipaddress
 from urllib.parse import urlparse
 from flask import Blueprint, request, Response, stream_with_context, current_app, abort
 from flask_login import login_required, current_user
-from mongoengine.queryset.visitor import Q
 from app.services.authorization import require_permission
-from app.services.file_security import managed_file_read_allowed
+from app.services.file_security import readable_managed_file_for_rel_path
 from app.models.artifact import PartFile
 
 files_proxy = Blueprint("files_proxy", __name__)
@@ -18,13 +17,10 @@ def _authorize_rel_path(rel_path: str) -> PartFile:
     rel_norm = _normalize_rel(rel_path)
     if not rel_norm or rel_norm.startswith(".."):
         abort(404)
-    matches = list(
-        PartFile.objects(Q(rel_path=rel_norm) | Q(rel_path__iexact=rel_norm))
-    )
-    allowed = [pf for pf in matches if managed_file_read_allowed(current_user, pf)]
-    if len(allowed) != 1:
+    record = readable_managed_file_for_rel_path(current_user, rel_norm)
+    if record is None:
         abort(404)
-    return allowed[0]
+    return record
 
 
 def _proxy(up_path: str, *, rel_path: str | None = None):

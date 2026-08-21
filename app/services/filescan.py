@@ -23,6 +23,7 @@ _DATASHEET_ATTR_KEYS = {
     "datasheet_url",
 }
 _DATASHEET_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
+_LEGACY_UNIQUE_PATH_INDEX = "path_1"
 
 # Directory listings reused across the parts of a single scan. Empty outside a
 # ``scan_cache()`` block so ordinary one-part lookups always hit fresh storage.
@@ -369,6 +370,34 @@ def _group_from_ext(ext: str) -> Optional[str]:
     if ext in {"ply"}: return "ply"
     if ext in {"stl"}: return "stl"
     return None
+
+
+def drop_legacy_unique_path_index() -> bool:
+    """Retire the global unique index on ``PartFile.path``.
+
+    One stored file can legitimately belong to several parts - a vendor
+    catalogue datasheet is resolved by the name in each part's datasheet
+    column, so every part it covers points at that same PDF. The unique index
+    turned the second such record into an E11000 duplicate key error, which
+    aborted the whole import (and every storage rescan) rather than the one
+    record. Identity is still (part_number, revision, ext_group, ext, is_dwg),
+    and that index remains unique.
+
+    MongoEngine only ever creates indexes, so databases written before the
+    field lost ``unique=True`` still carry it. Dropping it is metadata-only: no
+    document is read, written or removed.
+    """
+    collection = PartFile._get_collection()
+    index = collection.index_information().get(_LEGACY_UNIQUE_PATH_INDEX)
+    if not index or not index.get("unique"):
+        return False
+    collection.drop_index(_LEGACY_UNIQUE_PATH_INDEX)
+    logger.info(
+        "dropped the legacy unique index %s on part_files; one file may serve "
+        "several parts",
+        _LEGACY_UNIQUE_PATH_INDEX,
+    )
+    return True
 
 
 def upsert_part_files_detailed(

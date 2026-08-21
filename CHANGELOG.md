@@ -7,6 +7,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ### Fixed
 
+- **Parts may share one datasheet.** A vendor catalogue covers a family of
+  parts, so several part/revision pairs legitimately name the same PDF — but
+  `PartFile.path` was globally unique, so the second record was an E11000
+  duplicate key error that aborted the entire import (and any storage rescan)
+  rather than the one file. The identity that matters — part, revision, group,
+  extension, drawing flag — is still unique. Existing databases have the stale
+  index dropped at startup; nothing else about them changes. A shared datasheet
+  carried *in* a pack now reaches every part that names it instead of being
+  skipped as ambiguous, and deleting one of those parts with *delete files*
+  leaves the file for the parts still pointing at it.
 - **Import no longer drops approval fields it said it would keep.** Approval is
   written as one set — every alias is removed and the canonical fields are
   re-written — but only the *changed* rows were written back. An import that

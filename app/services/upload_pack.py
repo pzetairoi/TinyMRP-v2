@@ -215,6 +215,31 @@ def _deliverable_identity(filename: str) -> tuple[str, str, bool] | None:
         return None
     pn = clean_pn(base[:marker])
     return (pn, clean_rev(base[marker + 5 :]), drawing) if pn else None
+def _datasheet_owners(
+    parts: dict[tuple[str, str], dict[str, Any]],
+    filename: str,
+) -> list[tuple[str, str]]:
+    """Every part whose datasheet column names this file.
+
+    A datasheet carries no ``_REV_``, so it is matched by name instead. More
+    than one owner is normal rather than ambiguous: a vendor catalogue is one
+    PDF covering a whole family of parts, and each of them gets a record
+    pointing at it.
+    """
+    target = os.path.basename(filename or "").casefold()
+    owners = []
+    for pair, part in parts.items():
+        named = next(
+            (
+                value
+                for raw_key, value in part["attrs"].items()
+                if canonical_attr_key(raw_key) == "datasheet"
+            ),
+            "",
+        )
+        if os.path.basename(str(named)).casefold() == target:
+            owners.append(pair)
+    return owners
 def _png_data_uri(payload: bytes, size: int) -> str:
     """Downscale a packed PNG to an inline data URI, or return nothing."""
 
@@ -586,36 +611,12 @@ def parse_import_package(
                 extension = _validate_deliverable_extension(group, filename_only)
                 identity = _deliverable_identity(filename_only)
                 if identity:
-                    pn, rev, drawing = identity
+                    owners, drawing = [(identity[0], identity[1])], identity[2]
                 elif group == "datasheet":
-                    matches = [
-                        key
-                        for key, part in parts.items()
-                        if os.path.basename(
-                            str(
-                                next(
-                                    (
-                                        value
-                                        for raw_key, value in part["attrs"].items()
-                                        if canonical_attr_key(raw_key) == "datasheet"
-                                    ),
-                                    "",
-                                )
-                            )
-                        ).casefold()
-                        == filename_only.casefold()
-                    ]
-                    if len(matches) != 1:
-                        diagnostics["warnings"].append(
-                            {
-                                "severity": "warning",
-                                "stage": "files.identity",
-                                "message": f"Could not resolve datasheet owner: {safe}",
-                            }
-                        )
-                        continue
-                    (pn, rev), drawing = matches[0], False
+                    owners, drawing = _datasheet_owners(parts, filename_only), False
                 else:
+                    owners, drawing = [], False
+                if not owners:
                     diagnostics["warnings"].append(
                         {
                             "severity": "warning",
@@ -624,20 +625,22 @@ def parse_import_package(
                         }
                     )
                     continue
-                if not _claim_pair(parts, (pn, rev), safe, diagnostics):
-                    continue
                 content = zf.read(info)
-                files.append(
-                    {
-                        "kind": "managed",
-                        "pair": (pn, rev),
-                        "identity": (group, extension, bool(drawing) if group == "png" else False),
-                        "name": filename_only,
-                        "relative_path": f"{group}/{filename_only}",
-                        "bytes": content,
-                        "sha256": hashlib.sha256(content).hexdigest(),
-                    }
-                )
+                digest = hashlib.sha256(content).hexdigest()
+                for pair in owners:
+                    if not _claim_pair(parts, pair, safe, diagnostics):
+                        continue
+                    files.append(
+                        {
+                            "kind": "managed",
+                            "pair": pair,
+                            "identity": (group, extension, bool(drawing) if group == "png" else False),
+                            "name": filename_only,
+                            "relative_path": f"{group}/{filename_only}",
+                            "bytes": content,
+                            "sha256": digest,
+                        }
+                    )
                 continue
             if head == "extra":
                 if not options.get("allow_extra", True):

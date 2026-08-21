@@ -865,8 +865,11 @@ points at the new name and the old file stays behind in storage, unreferenced.</
 <code>.eprt</code> and <code>.easm</code> under <code>edr</code>.</li>
 <li><strong>Identical bytes are <em>unchanged</em>.</strong> Re-uploading the same file writes nothing.</li>
 <li>A <strong>datasheet</strong> whose name carries no <code>_REV_</code> is matched to its part through the
-part's datasheet column instead. If that matches no part, or more than one, it
-is reported and skipped.</li>
+part's datasheet column instead. If that matches no part it is reported and
+skipped. If it matches several, <strong>every one of them gets a record</strong> — one
+vendor catalogue covering a family of parts is the normal case, and the file
+is stored once under <code>datasheet/</code>. Deleting one of those parts with <em>delete
+files</em> leaves the catalogue alone until the last part naming it is gone.</li>
 </ul>
 <h3 id="associated-files-extrapnrev">Associated files (<code>extra/&lt;PN&gt;/&lt;REV&gt;/…</code>)</h3>
 <p>Here the identity <strong>is</strong> the stored path, so the file name matters: uploading

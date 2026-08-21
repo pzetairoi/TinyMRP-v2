@@ -414,6 +414,30 @@ def managed_file_read_allowed(
     )
 
 
+def readable_managed_file_for_rel_path(user: Any, rel_path: str) -> Any | None:
+    """The record a URL's relative path names, if this user may read it.
+
+    Several records can name one stored file - a vendor catalogue datasheet
+    belongs to every part it covers - and reading any of them serves the same
+    bytes, so one readable owner is enough. What stays refused is genuine
+    ambiguity about WHICH file is meant: the lookup is case-insensitive, so it
+    can also turn up records for two differently-spelled paths, and there is no
+    way to tell which one the URL asked for.
+    """
+    from mongoengine.queryset.visitor import Q
+
+    from app.models.artifact import PartFile
+
+    readable = [
+        record
+        for record in PartFile.objects(Q(rel_path=rel_path) | Q(rel_path__iexact=rel_path))
+        if managed_file_read_allowed(user, record)
+    ]
+    if len({str(record.rel_path or "") for record in readable}) != 1:
+        return None
+    return readable[0]
+
+
 def managed_file_metadata_allowed(user: Any, file_record: Any) -> bool:
     if not managed_file_read_allowed(user, file_record):
         return False

@@ -888,7 +888,20 @@ def create_app(config_object=None):
         ensure_active_part_field_indexes()
     except Exception:
         pass
-    
+
+    # Databases written before PartFile.path stopped being unique still carry
+    # the index, and leaving it makes a shared datasheet abort a whole import.
+    # Say so rather than failing quietly if the drop does not go through.
+    try:
+        from app.services.filescan import drop_legacy_unique_path_index
+        drop_legacy_unique_path_index()
+    except Exception:
+        logger.warning(
+            "Could not drop the legacy unique index on part_files.path; imports "
+            "of parts that share one datasheet will keep failing until it is gone.",
+            exc_info=True,
+        )
+
     # Load manifest ONCE at startup
     _load_vite_manifest(app)
 

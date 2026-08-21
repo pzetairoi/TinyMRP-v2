@@ -287,3 +287,35 @@ def test_upsert_collapses_case_variant_rows_split_across_storage_roots(app, tmp_
         assert PartFile.objects.count() == 1
         survivor = PartFile.objects.first()
         assert survivor.path == str(new_root / "png" / name)
+
+
+def test_drop_legacy_unique_path_index_lets_one_file_serve_two_parts(app):
+    """Existing databases still carry the index; the drop is what retires it."""
+    from app.models.artifact import PartFile
+    from app.services.filescan import (
+        _LEGACY_UNIQUE_PATH_INDEX,
+        drop_legacy_unique_path_index,
+        upsert_part_files_detailed,
+    )
+
+    with app.app_context():
+        collection = PartFile._get_collection()
+        collection.create_index("path", name=_LEGACY_UNIQUE_PATH_INDEX, unique=True)
+
+        assert drop_legacy_unique_path_index() is True
+        assert _LEGACY_UNIQUE_PATH_INDEX not in collection.index_information()
+        # Idempotent: a database that never had it, or has already been
+        # migrated, is left alone.
+        assert drop_legacy_unique_path_index() is False
+
+        shared = {
+            "ext": "pdf",
+            "ext_group": "datasheet",
+            "rel_path": "datasheet/catalog.pdf",
+            "abs_path": "/storage/datasheet/catalog.pdf",
+        }
+        upsert_part_files_detailed([
+            {"part_number": "IDX-1", "revision": "A", **shared},
+            {"part_number": "IDX-2", "revision": "A", **shared},
+        ])
+        assert PartFile.objects(path="/storage/datasheet/catalog.pdf").count() == 2

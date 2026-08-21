@@ -217,8 +217,11 @@ Consequences worth knowing:
   `.eprt` and `.easm` under `edr`.
 - **Identical bytes are *unchanged*.** Re-uploading the same file writes nothing.
 - A **datasheet** whose name carries no `_REV_` is matched to its part through the
-  part's datasheet column instead. If that matches no part, or more than one, it
-  is reported and skipped.
+  part's datasheet column instead. If that matches no part it is reported and
+  skipped. If it matches several, **every one of them gets a record** — one
+  vendor catalogue covering a family of parts is the normal case, and the file
+  is stored once under `datasheet/`. Deleting one of those parts with *delete
+  files* leaves the catalogue alone until the last part naming it is gone.
 
 ### Associated files (`extra/<PN>/<REV>/…`)
 

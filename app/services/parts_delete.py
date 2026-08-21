@@ -64,6 +64,14 @@ def _remove_existing(candidates: List[str], allowed_roots: List[str]) -> int:
     return removed
 
 
+def _shared_with_another_part(doc: PartFile) -> bool:
+    """Whether some other part's record points at this same stored file."""
+    rel = str(getattr(doc, "rel_path", "") or "").strip()
+    if not rel:
+        return False
+    return bool(PartFile.objects(id__ne=doc.id, rel_path=rel).first())
+
+
 def _delete_physical_files_for(pn: str, rev: str) -> Dict[str, int]:
     """
     Physically remove from the server every file related to (pn, rev):
@@ -87,6 +95,13 @@ def _delete_physical_files_for(pn: str, rev: str) -> Dict[str, int]:
     )
 
     for doc in PartFile.objects(part_number__iexact=pn, revision__iexact=rev):
+        if _shared_with_another_part(doc):
+            # A vendor catalogue datasheet is one PDF serving every part it
+            # covers. Deleting this part must not take the file - and its
+            # thumbnail - out from under the others still pointing at it. The
+            # records are removed per pair, so the last owner deleted is the
+            # one that finds no other referrer and removes the file.
+            continue
         file_path = resolve_managed_path(doc, must_exist=False)
         if file_path.exists():
             file_path.unlink()

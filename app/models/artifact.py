@@ -15,7 +15,10 @@ class PartFile(Document):
     size        = FloatField()
     mtime_iso   = DateTimeField()
     is_dwg      = BooleanField(default=False) # <-- key: distinguishes *_DWG.png    
-    path        = StringField(required=True, unique=True)   # absolute OS path
+    # NOT unique: one stored file can serve many parts. A datasheet is found
+    # by the name in the part's datasheet column, so every part covered by the
+    # same vendor catalogue points at that one PDF.
+    path        = StringField(required=True)   # absolute OS path
     sha256      = StringField()
     mtime       = DateTimeField()
     content_type= StringField()
@@ -34,6 +37,10 @@ class PartFile(Document):
         # unique identity for an artifact type per PN+REV
         {"fields": ["part_number", "revision", "ext_group", "ext","is_dwg"], "unique": True},
         {"fields": ["ext_group", "part_number", "revision"], "name": "part_files_ext_group_part_rev_idx"},
+        # NOT unique: several parts can point at one stored file. Serving a file
+        # by URL and deciding whether a part delete may remove it both ask which
+        # records name a path, and both used to scan the collection.
+        {"fields": ["rel_path"], "name": "part_files_rel_path_idx"},
     ]
 }
 

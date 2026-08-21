@@ -8,6 +8,7 @@ from app.services.file_security import (
     FileSecurityError,
     managed_file_read_allowed,
     managed_storage_roots,
+    readable_managed_file_for_rel_path,
     resolve_managed_path,
 )
 from app.models.artifact import PartFile
@@ -167,20 +168,12 @@ def auth():
     if not rel_norm:
         return ("", 403)
     try:
-        from mongoengine.queryset.visitor import Q
-
-        matches = [
-            pf
-            for pf in PartFile.objects(
-                Q(rel_path=rel_norm) | Q(rel_path__iexact=rel_norm)
-            )
-            if managed_file_read_allowed(current_user, pf)
-        ]
-        if len(matches) != 1:
+        record = readable_managed_file_for_rel_path(current_user, rel_norm)
+        if record is None:
             # Not 404: nginx cannot interpret it and answers the user with a
             # 500 instead of denying the download.
             return ("", 403)
-        resolve_managed_path(matches[0], must_exist=False)
+        resolve_managed_path(record, must_exist=False)
     except Exception:
         # Refusing is correct - this is the path-traversal guard - but a 403
         # caused by a resolver bug and a 403 caused by an actual traversal
