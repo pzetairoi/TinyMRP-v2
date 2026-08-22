@@ -135,6 +135,21 @@ approval barrier without widening the relationship scope.
   - quickstart visibility
 - Build/validate/save/deactivate schemes in browser.
 
+### The built-in numbering scheme
+
+A new instance starts with one scheme, *Default: PART-SEQ6*, so there is
+something to allocate from on day one. It is a starting point, not a fixture:
+
+- **It can be deleted, and it stays deleted.** It is seeded once, into a
+  database that has no scheme at all. It is never recreated afterwards — not on
+  restart, not on upgrade.
+- **You can delete every scheme.** *Start from* in the scheme builder defaults
+  to **Blank**, so a new scheme is always available even with nothing to copy.
+  Copying an existing scheme is a convenience, never the only route.
+- With no scheme at all, nothing can be allocated until you create one. Parts
+  imported from CAD are unaffected — they carry the numbers CAD already gave
+  them.
+
 ## Audit And Metrics
 
 ### Audit (`/admin/audit/`)

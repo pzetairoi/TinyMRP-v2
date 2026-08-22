@@ -478,10 +478,20 @@ def test_ensure_presets_seeds_no_revision_default():
     assert (scheme.revision or {}).get("start") == ""
 
 
+def _forget_preset_seeding():
+    """Simulate an instance upgraded from a build that had no seeding marker."""
+    from app.services.app_settings import get_app_settings
+
+    get_app_settings().update(set__numbering_preset_seeded=False)
+
+
 def test_ensure_presets_migrates_seeded_alpha_revision_to_none():
+    # The migration targets instances that predate the seeding marker, so the
+    # preset is already in place and carries the revision "A" older seeds forced.
     ensure_presets()
     scheme = NumberingScheme.objects(name="Default: PART-SEQ6").first()
     scheme.update(set__revision={"policy": "alpha", "start": "A"})
+    _forget_preset_seeding()
 
     ensure_presets()
 
@@ -525,3 +535,38 @@ def test_ensure_presets_does_not_add_duplicate_recommended_scheme():
     recommended = list(NumberingScheme.objects(is_recommended=True))
     assert len(recommended) == 1
     assert recommended[0].name == "Existing Recommended"
+
+
+def test_deleting_the_built_in_scheme_makes_it_stay_deleted():
+    """Issue #98: it used to come back on the next restart, and the next.
+
+    Seeding is a first-run convenience, not a promise that this scheme exists.
+    """
+    ensure_presets()
+    NumberingScheme.objects(name="Default: PART-SEQ6").first().delete()
+
+    ensure_presets()  # a restart
+    ensure_presets()  # and another
+
+    assert NumberingScheme.objects(name="Default: PART-SEQ6").first() is None
+    assert NumberingScheme.objects.count() == 0
+
+
+def test_upgrade_does_not_resurrect_a_scheme_deleted_before_the_marker_existed():
+    """The instance in issue #98: deleted under the old build, then upgraded."""
+    _simple_auto_scheme("House scheme")
+    _forget_preset_seeding()
+
+    ensure_presets()
+
+    assert NumberingScheme.objects(name="Default: PART-SEQ6").first() is None
+    assert [scheme.name for scheme in NumberingScheme.objects] == ["House scheme"]
+
+
+def test_upgrade_keeps_seeding_into_an_instance_that_never_had_a_scheme():
+    """An empty database is a first run whether or not the marker exists yet."""
+    _forget_preset_seeding()
+
+    ensure_presets()
+
+    assert NumberingScheme.objects(name="Default: PART-SEQ6").first() is not None

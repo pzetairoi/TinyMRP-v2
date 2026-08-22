@@ -234,3 +234,59 @@ def test_legacy_alias_routes_are_gone(client):
     assert client.get("/api/schemes").status_code in (401, 404)
     assert client.get("/api/settings").status_code in (401, 404)
     assert client.post("/api/preview", json={"scheme_id": "x"}).status_code in (401, 404)
+
+
+def test_a_blank_scheme_can_be_created_when_none_exist(client, user, monkeypatch):
+    """Deleting every scheme must not gridlock numbering.
+
+    New schemes are usually a copy of an existing one, so the last deletion
+    would strand an instance with nothing to copy. The builder's "Start from"
+    defaults to Blank, which posts a from-scratch definition - this is that
+    request, made against an empty database.
+    """
+    import app.views.numbering as numbering_view
+
+    monkeypatch.setattr(numbering_view, "user_has_permission", lambda _user, _perm: True)
+    _, raw = create_token(user, "blank-scheme")
+    headers = _auth_headers(raw)
+
+    NumberingScheme.objects.delete()  # the administrator deleted every scheme
+    assert NumberingScheme.objects.count() == 0
+
+    resp = client.post("/api/numbering/schemes", headers=headers, json={
+        "name": "Built from scratch",
+        "is_active": True,
+        "separator": "-",
+        "scope_mode": "global",
+        "scope_keys": [],
+        "seq": {"padding": 6, "base": 10, "start_at": 1, "reset_policy": "never"},
+        "revision": {"policy": "none", "start": ""},
+        "validation_rules": {"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
+        "pattern_segments": [
+            {"kind": "literal", "value": "PART"},
+            {"kind": "seq", "padding": 6, "base": 10, "start_at": 1, "auto_counter": True},
+        ],
+    })
+
+    data = resp.get_json()
+    assert resp.status_code == 200
+    assert data["ok"] is True
+    assert data["example"]["part_number_example"] == "PART-000001"
+    assert NumberingScheme.objects.count() == 1
+
+
+def test_allocating_with_no_scheme_refuses_cleanly(client, user, monkeypatch):
+    """With no scheme there is nothing to allocate from - but no 500 either."""
+    import app.views.numbering as numbering_view
+
+    monkeypatch.setattr(numbering_view, "user_has_permission", lambda _user, _perm: True)
+    _, raw = create_token(user, "no-scheme-allocate")
+    headers = _auth_headers(raw)
+
+    NumberingScheme.objects.delete()
+    assert NumberingScheme.objects.count() == 0
+
+    resp = client.post("/api/numbering/allocate", headers=headers, json={"context": {}})
+
+    assert resp.status_code == 400
+    assert resp.get_json()["error"]["code"] == "missing_scheme"

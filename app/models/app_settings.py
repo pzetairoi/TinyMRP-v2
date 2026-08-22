@@ -32,6 +32,10 @@ class AppSettings(Document):
     upload_pack_max_zip_mb = IntField(default=1024)
     upload_pack_max_file_mb = IntField(default=1024)
     upload_pack_max_files = IntField(default=5000)
+    # Set once, the first time the built-in numbering scheme is seeded. Seeding
+    # is a first-run convenience, not a guarantee: without this marker the boot
+    # seeder recreated a scheme the administrator had deliberately deleted.
+    numbering_preset_seeded = BooleanField(default=False)
     file_sources = ListField(DictField(), default=list)
     field_config = DictField(default=dict)
     process_meta = DictField(default=dict)

@@ -1868,6 +1868,20 @@ approval barrier without widening the relationship scope.</p>
 </li>
 <li>Build/validate/save/deactivate schemes in browser.</li>
 </ul>
+<h3 id="the-built-in-numbering-scheme">The built-in numbering scheme</h3>
+<p>A new instance starts with one scheme, <em>Default: PART-SEQ6</em>, so there is
+something to allocate from on day one. It is a starting point, not a fixture:</p>
+<ul>
+<li><strong>It can be deleted, and it stays deleted.</strong> It is seeded once, into a
+database that has no scheme at all. It is never recreated afterwards — not on
+restart, not on upgrade.</li>
+<li><strong>You can delete every scheme.</strong> <em>Start from</em> in the scheme builder defaults
+to <strong>Blank</strong>, so a new scheme is always available even with nothing to copy.
+Copying an existing scheme is a convenience, never the only route.</li>
+<li>With no scheme at all, nothing can be allocated until you create one. Parts
+imported from CAD are unaffected — they carry the numbers CAD already gave
+them.</li>
+</ul>
 </div></details><details class="help-section" id="sec-audit-and-metrics"><summary><span class="help-section-title" id="audit-and-metrics">Audit And Metrics</span></summary><div class="help-section-body">
 <h3 id="audit-adminaudit">Audit (<code>/admin/audit/</code>)</h3>
 <ul>
