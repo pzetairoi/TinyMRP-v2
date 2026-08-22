@@ -432,11 +432,33 @@ backup() {
   archive_bytes="$(verify_dump "$partial/mongo.archive.gz")"
   cp "$ENV_FILE" "$partial/config.env"
   chmod 600 "$partial/config.env"
+  # Deliverables are off unless the install asked for them, or this run says so.
+  # The database is small and irreplaceable; the deliverables are large and CAD
+  # can regenerate them, so backing both up every time is how a disk fills.
+  local want_files=0 dest
+  [[ "$(env_get BACKUP_INCLUDE_DELIVERABLES)" == "true" ]] && want_files=1
   if [[ "$include_files" == "--include-deliverables" ]]; then
-    need_command tar
-    tar -C "$(env_get DELIVERABLES_PATH)" -czf "$partial/deliverables.tar.gz" .
+    want_files=1
+  elif [[ "$include_files" == "--no-deliverables" ]]; then
+    want_files=0
   elif [[ -n "$include_files" ]]; then
-    die "Usage: ./tinymrp.sh backup [--include-deliverables]"
+    die "Usage: ./tinymrp.sh backup [--include-deliverables|--no-deliverables]"
+  fi
+  if (( want_files )); then
+    need_command tar
+    dest="$(env_get BACKUP_DELIVERABLES_DEST)"
+    if [[ -n "$dest" ]]; then
+      # Written to the other drive, with a pointer left behind so restore can
+      # find it without assuming the two halves live together.
+      mkdir -p "$dest/$stamp"
+      tar -C "$(env_get DELIVERABLES_PATH)" -czf "$dest/$stamp/deliverables.tar.gz" .
+      printf 'deliverables_archive=%s
+' "$dest/$stamp/deliverables.tar.gz" >"$partial/deliverables.location"
+      printf 'Deliverables archived to %s
+' "$dest/$stamp/deliverables.tar.gz"
+    else
+      tar -C "$(env_get DELIVERABLES_PATH)" -czf "$partial/deliverables.tar.gz" .
+    fi
   fi
   {
     printf 'created_utc=%s\n' "$stamp"
@@ -444,7 +466,16 @@ backup() {
     printf 'mongo_uncompressed_bytes=%s\n' "$archive_bytes"
     printf 'deliverables_included=%s\n' "$([[ -f "$partial/deliverables.tar.gz" ]] && echo true || echo false)"
   } >"$partial/metadata.txt"
-  (cd "$partial" && sha256sum mongo.archive.gz config.env metadata.txt ${include_files:+deliverables.tar.gz} >checksums.sha256)
+  (
+    cd "$partial"
+    # Only over what is actually here: with a separate destination the archive
+    # is on another drive and a pointer file stands in for it.
+    extra=""
+    [[ -f deliverables.tar.gz ]] && extra="deliverables.tar.gz"
+    [[ -f deliverables.location ]] && extra="${extra} deliverables.location"
+    # shellcheck disable=SC2086
+    sha256sum mongo.archive.gz config.env metadata.txt ${extra} >checksums.sha256
+  )
   mv "$partial" "$target"
   prune_backups
   if ! backup_free_space_until 0; then
@@ -479,11 +510,18 @@ restore() {
     die "mongorestore failed; the app remains stopped."
   fi
   if [[ "$option" == "--include-deliverables" || "${3:-}" == "--include-deliverables" ]]; then
-    [[ -f "$source/deliverables.tar.gz" ]] || die "This backup has no deliverables archive."
-    if tar -tzf "$source/deliverables.tar.gz" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+    # Normally beside the database dump; a backup taken with a separate
+    # destination leaves a pointer to another drive instead.
+    local dtar="$source/deliverables.tar.gz"
+    if [[ ! -f "$dtar" && -f "$source/deliverables.location" ]]; then
+      dtar="$(sed -n 's/^deliverables_archive=//p' "$source/deliverables.location" | tail -n 1)"
+      [[ -n "$dtar" && -f "$dtar" ]] || die "This backup keeps its deliverables at ${dtar:-an unrecorded path}, which is not there. If that drive is not mounted, mount it and try again; the database half is unaffected."
+    fi
+    [[ -f "$dtar" ]] || die "This backup has no deliverables archive."
+    if tar -tzf "$dtar" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
       die "Unsafe path found in deliverables archive."
     fi
-    tar -xzf "$source/deliverables.tar.gz" -C "$(env_get DELIVERABLES_PATH)"
+    tar -xzf "$dtar" -C "$(env_get DELIVERABLES_PATH)"
   fi
   profile_up --wait app
   wait_for_app || die "Restore completed but TinyMRP did not become healthy; inspect ./tinymrp.sh logs."

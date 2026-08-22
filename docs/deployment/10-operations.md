@@ -258,6 +258,100 @@ restore points, or a run of daily ones could evict the only copy of the
 deliverables. A backup counts as *full* if it contains `deliverables.tar.gz`;
 nothing about the folder layout changed, so restore and rollback are unaffected.
 
+### What gets backed up
+
+**The database is always backed up. Deliverables are not, unless you ask.**
+
+That is the default on a fresh install, and it is deliberate: the database is a
+few MB and cannot be reconstructed, while the deliverables are many GB and CAD
+can usually regenerate them. Backing both up nightly is how a disk fills.
+
+The installer asks:
+
+```
+Also back up deliverables? (yes/no) [no]
+```
+
+Answer `yes` and it asks where to put them:
+
+```
+Deliverables backup folder [~/TinyMRP/Backups/Deliverables]
+```
+
+**Choose a folder on another drive if you can.** A backup on the same disk as
+the data protects you from a mistake, not from losing the disk. When a separate
+folder is set, the deliverables archive is written there and the backup folder
+records an absolute pointer to it in `manifest.env`; `restore-instance.sh`
+follows that pointer, so a restore works the same either way. If the drive is
+not mounted at restore time it says so and leaves the database half alone.
+
+Non-interactive installs use `TINYMRP_BACKUP_DELIVERABLES` (`yes`/`no`, default
+`no`) and `TINYMRP_BACKUP_DELIVERABLES_DEST`.
+
+| Setting | Effect |
+| --- | --- |
+| Deliverables off *(default)* | Database only, every day. Nothing else is copied |
+| Deliverables on, no folder given | Archive lands beside the database backup — same disk as the data |
+| Deliverables on, folder given | Archive goes to that folder; the backup records where |
+
+The weekly timer is installed either way. It is **idle** while deliverables are
+off, so turning them on later needs no host access.
+
+On the VPS multi-instance path there is no interactive installer, so the same
+choices are flags:
+
+```bash
+# database only (the default - no flag needed)
+sudo ./deploy/scripts/backup-instance.sh company1
+
+# include the files, this run only
+sudo ./deploy/scripts/backup-instance.sh company1 --with-deliverables
+
+# include them, written to another drive, monthly
+sudo ./deploy/scripts/backup-all.sh      --deliverables-dest /mnt/backupdrive/tinymrp      --deliverables-frequency monthly
+```
+
+`--no-deliverables` forces a single run to skip them even when the policy says
+otherwise.
+
+### How often deliverables are copied
+
+`weekly`, `fortnightly` or `monthly` — `monthly` by default. The weekly timer
+still fires; the script decides whether this run is due, so the frequency can be
+changed without touching systemd.
+
+Frequency only ever removes work: it can turn a deliverables run into a
+database-only one, never the other way round. `--with-deliverables` on the
+command line overrides it for a single run, and `--no-deliverables` forces one
+run to skip them. **The person at the terminal always wins over the stored
+policy** — a stored preference must not override a deliberate instruction.
+
+If no full backup exists yet, the first run always takes one.
+
+### Where the policy lives
+
+The backup runs on the **host**. The app container has a read-only backups
+mount, no docker socket and an unprivileged user, and granting it any of those
+would turn a web vulnerability into a host compromise. So the direction is
+reversed: the app records the policy in its own database, and the host script
+reads it before each run.
+
+Precedence, weakest first:
+
+```
+built-in default   <   instance env file   <   admin dashboard
+```
+
+Anything the dashboard has not set is left as it was, which is what lets an
+existing installation keep behaving exactly as it does today. If the settings
+cannot be read at all the backup still runs, on its flags.
+
+**Admin → the backups panel** reports what this adds up to: what each backup
+holds (database only, or database + files), where the files went, what a copy
+costs, and how much room is left. It is read-only — there is no button that can
+start or destroy a backup, because the app has no privilege to do either and
+giving it that privilege is a bad trade.
+
 ### The free-space floor
 
 The limits above bound the *backup folder*. Only this one bounds the **disk**,

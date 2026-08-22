@@ -93,3 +93,132 @@ def test_listing_never_writes_to_the_backups_directory(backups_dir):
     backups.summary()
     backups.list_backups()
     assert sorted(os.listdir(backups_dir)) == before
+
+
+# --- what a backup holds, and where it went ---------------------------------
+#
+# Deliverables are the expensive half and are off by default. When they are
+# turned on they can be written to another drive, in which case the backup
+# folder holds only a pointer. The dashboard has to describe that accurately:
+# an operator deciding whether they are covered needs to know what each backup
+# contains, not just how big the folder is.
+
+
+def _backup(backups_dir, name: str, *, manifest: str = "", deliverables: bool = False):
+    path = backups_dir / name
+    path.mkdir()
+    with gzip.open(path / "mongo.archive.gz", "wb") as handle:
+        handle.write(b"x" * 4096)
+    if deliverables:
+        (path / "deliverables.tar.gz").write_bytes(b"y" * 2048)
+    if manifest:
+        (path / "manifest.env").write_text(manifest, encoding="utf-8")
+    return path
+
+
+def test_a_database_only_backup_is_reported_as_such(backups_dir):
+    _backup(backups_dir, "20260101-000000")
+
+    row = backups.list_backups()[0]
+
+    assert row["kind"] == "database"
+    assert row["deliverables_elsewhere"] == ""
+
+
+def test_deliverables_in_the_folder_make_it_a_full_backup(backups_dir):
+    _backup(backups_dir, "20260101-000000", deliverables=True)
+
+    row = backups.list_backups()[0]
+
+    assert row["kind"] == "full"
+
+
+def test_deliverables_on_another_drive_still_count_as_a_full_backup(backups_dir):
+    """The folder holds a pointer, not the archive.
+
+    Classifying by the local file alone would call this database-only, and the
+    dashboard would tell an operator they have no file backup when they do.
+    """
+    _backup(
+        backups_dir,
+        "20260101-000000",
+        manifest="DELIVERABLES_ARCHIVE=/mnt/backup/inst/20260101-000000/deliverables.tar.gz\nDELIVERABLES_BYTES=2048\n",
+    )
+
+    row = backups.list_backups()[0]
+
+    assert row["kind"] == "full"
+    assert row["deliverables_elsewhere"].startswith("/mnt/backup/")
+    assert row["deliverables_bytes"] == 2048
+
+
+def test_the_summary_counts_each_kind_and_the_off_drive_cost(backups_dir):
+    _backup(backups_dir, "20260101-000000")
+    _backup(backups_dir, "20260102-000000", deliverables=True)
+    _backup(
+        backups_dir,
+        "20260103-000000",
+        manifest="DELIVERABLES_ARCHIVE=/mnt/backup/x.tar.gz\nDELIVERABLES_BYTES=5000\n",
+    )
+
+    report = backups.summary()
+
+    assert report["count"] == 3
+    assert report["full_count"] == 2
+    assert report["database_count"] == 1
+    assert report["offsite_bytes"] == 5000
+    assert report["latest_full"]["name"] == "20260103-000000"
+
+
+def test_the_policy_defaults_to_database_only(app):
+    """Nothing configured must mean deliverables are NOT backed up."""
+    with app.app_context():
+        policy = backups.effective_policy()
+
+    assert policy["database_included"] is True
+    assert policy["deliverables_included"] is False
+
+
+def test_the_policy_reports_where_deliverables_go(app):
+    from app.models.app_settings import AppSettings
+
+    with app.app_context():
+        AppSettings(
+            backup_include_deliverables=True,
+            backup_deliverables_frequency="fortnightly",
+            backup_deliverables_dest="/mnt/backupdrive",
+        ).save()
+
+        policy = backups.effective_policy()
+
+    assert policy["deliverables_included"] is True
+    assert policy["deliverables_frequency_label"] == "every two weeks"
+    assert policy["deliverables_destination"] == "/mnt/backupdrive"
+    assert policy["deliverables_offsite"] is True
+
+
+def test_deliverables_beside_the_database_are_flagged_as_not_offsite(app):
+    """A backup on the same disk as the data protects against a mistake only."""
+    from app.models.app_settings import AppSettings
+
+    with app.app_context():
+        AppSettings(backup_include_deliverables=True, backup_deliverables_dest="").save()
+
+        policy = backups.effective_policy()
+
+    assert policy["deliverables_included"] is True
+    assert policy["deliverables_offsite"] is False
+
+
+def test_the_summary_survives_unreadable_settings(backups_dir, monkeypatch):
+    """The panel is diagnostic; it must render when things are broken."""
+    def _boom():
+        raise RuntimeError("no database")
+
+    monkeypatch.setattr(backups, "effective_policy", _boom)
+    _backup(backups_dir, "20260101-000000")
+
+    report = backups.summary()
+
+    assert report["policy"] is None
+    assert report["count"] == 1

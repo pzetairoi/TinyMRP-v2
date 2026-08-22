@@ -81,6 +81,10 @@ fi
 # must not expire each other.
 RETENTION_ARGS="--keep-days ${KEEP_DAYS} --keep-count ${KEEP_COUNT} --keep-full ${KEEP_FULL} --keep-db ${KEEP_DB} --max-total-gb ${MAX_TOTAL_GB} --min-free-gb ${MIN_FREE_GB} --min-free-pct ${MIN_FREE_PCT}"
 
+# The weekly job is installed but IDLE by default: it no longer forces
+# deliverables on, it asks the policy. Deliverables are off until somebody turns
+# them on, and when they do, the timer is already in place - no host access
+# needed to start including them.
 BACKUP_CMD="$(repo_root)/deploy/scripts/backup-all.sh ${RETENTION_ARGS} --continue-on-error${EXTRA_FLAGS}"
 DB_BACKUP_CMD="$(repo_root)/deploy/scripts/backup-all.sh ${RETENTION_ARGS} --continue-on-error --no-deliverables"
 if [ -n "$DEST_ROOT" ]; then

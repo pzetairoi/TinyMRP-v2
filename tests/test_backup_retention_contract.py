@@ -221,3 +221,92 @@ def test_age_pruning_spares_database_only_backups():
         "has been failing, that stale copy is the only copy of the deliverables"
     )
 
+
+# --- what the documentation promises about deliverables ---------------------
+
+
+def test_deliverables_are_off_unless_asked_for():
+    """The installer default and the model default must agree on "no"."""
+    model = (REPO / "app" / "models" / "app_settings.py").read_text(encoding="utf-8")
+    assert "backup_include_deliverables = BooleanField(default=False)" in model, (
+        "deliverables must default to OFF: they are many GB against a few MB "
+        "and CAD can regenerate them"
+    )
+    installer = (REPO / "deploy" / "community" / "install.sh").read_text(encoding="utf-8")
+    assert "Also back up deliverables?" in installer, (
+        "the installer must ask, rather than deciding silently"
+    )
+    assert "'no'" in installer, "the installer's default answer must be no"
+
+
+def test_the_installer_asks_where_deliverables_backups_go():
+    installer = (REPO / "deploy" / "community" / "install.sh").read_text(encoding="utf-8")
+    assert "Deliverables backup folder" in installer
+    assert "BACKUP_DELIVERABLES_DEST" in installer, (
+        "the answer must be recorded, or it is a question with no effect"
+    )
+    assert "TINYMRP_BACKUP_DELIVERABLES" in installer, (
+        "non-interactive installs need the same choice"
+    )
+
+
+def test_a_separate_destination_leaves_a_pointer_restore_can_follow():
+    """Both halves must agree, or a restore silently loses the deliverables."""
+    backup = _executable_source(VPS)
+    restore = _executable_source(REPO / "deploy" / "scripts" / "restore-instance.sh")
+    assert "DELIVERABLES_ARCHIVE=" in backup, (
+        "the backup must record where it put the archive"
+    )
+    assert "DELIVERABLES_ARCHIVE" in restore, (
+        "restore-instance.sh does not follow the pointer, so a backup written "
+        "to another drive would restore its database and silently skip its files"
+    )
+
+
+def test_the_off_drive_archive_still_counts_as_a_full_backup():
+    """Retention classifies by content; a pointer is content."""
+    backup = _executable_source(VPS)
+    kind = backup[backup.index("backup_kind() {"):]
+    kind = kind[: kind.index(chr(10) + "}")]
+    assert "DELIVERABLES_ARCHIVE" in kind, (
+        "backup_kind checks only for a local archive, so every off-drive full "
+        "backup would be counted as database-only and retention would keep 30"
+    )
+
+
+def test_the_second_drive_gets_its_own_free_space_check():
+    backup = _executable_source(VPS)
+    assert "deliverables backup drive" in backup, (
+        "a separate destination is a separate filesystem; without its own floor "
+        "the script would fill it while reporting the first disk was fine"
+    )
+
+
+def test_the_terminal_overrides_the_stored_policy():
+    backup = _executable_source(VPS)
+    assert "FORCE_DELIVERABLES" in backup and "NO_DELIVERABLES" in backup, (
+        "--with-deliverables / --no-deliverables must beat the stored policy: "
+        "they are a decision about THIS run by the person running it"
+    )
+
+
+def test_reading_the_policy_can_never_fail_the_backup():
+    backup = _executable_source(VPS)
+    apply_block = backup[backup.index("apply_backup_policy() {"):]
+    apply_block = apply_block[: apply_block.index(chr(10) + "}")]
+    assert "return 0" in apply_block, (
+        "apply_backup_policy must return success even when the settings cannot "
+        "be read; an unreachable database must not stop the backup"
+    )
+
+
+def test_the_documentation_states_the_default_and_the_drive_advice():
+    doc = (REPO / "docs" / "deployment" / "10-operations.md").read_text(encoding="utf-8")
+    assert "Deliverables are not, unless you ask" in doc
+    assert "another drive" in doc, (
+        "the docs must say why a separate drive matters: a backup on the same "
+        "disk protects against a mistake, not a dead drive"
+    )
+    for token in ("--with-deliverables", "--deliverables-dest", "fortnightly"):
+        assert token in doc, f"10-operations.md does not document {token}"
+

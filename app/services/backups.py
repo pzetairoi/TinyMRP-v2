@@ -67,6 +67,37 @@ def _dir_size_bytes(path: str) -> int:
     return total
 
 
+# The deliverables archive may live on another drive entirely, in which case the
+# backup folder holds only a pointer. Reading it is how the dashboard can say
+# what a backup actually contains and where it went.
+def _manifest(path: str) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for name in ("manifest.env", "deliverables.location"):
+        candidate = os.path.join(path, name)
+        try:
+            with open(candidate, "r", encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    key, sep, value = line.strip().partition("=")
+                    if sep and key:
+                        out[key.strip().lower()] = value.strip()
+        except OSError:
+            continue
+    return out
+
+
+def _kind_of(path: str, manifest: Dict[str, str]) -> str:
+    """"full" carries the deliverables, "database" does not.
+
+    Classified the same way the host script classifies it for retention, so the
+    dashboard and the pruning rules can never disagree about what a backup is.
+    """
+    if os.path.isfile(os.path.join(path, "deliverables.tar.gz")):
+        return "full"
+    if manifest.get("deliverables_archive"):
+        return "full"
+    return "database"
+
+
 def backups_available() -> bool:
     """Whether this instance can see its backups at all."""
     try:
@@ -97,11 +128,25 @@ def list_backups(limit: int = 50) -> List[Dict[str, Any]]:
             created = datetime.fromtimestamp(os.path.getmtime(path), tz=timezone.utc)
         except OSError:
             created = None
+        manifest = _manifest(path)
+        kind = _kind_of(path, manifest)
+        elsewhere = manifest.get("deliverables_archive") or ""
+        # The folder size does not include an archive kept on another drive, so
+        # report that separately rather than understating what the backup costs.
+        try:
+            deliverables_bytes = int(manifest.get("deliverables_bytes") or 0)
+        except (TypeError, ValueError):
+            deliverables_bytes = 0
         rows.append(
             {
                 "name": name,
                 "size_bytes": _dir_size_bytes(path),
                 "created_at": created,
+                "kind": kind,
+                "deliverables_bytes": deliverables_bytes,
+                # Absolute host path when the archive is on another drive, empty
+                # when it sits in the folder or the backup has none.
+                "deliverables_elsewhere": elsewhere,
                 # Reported, not enforced. A operator seeing "looks empty" has
                 # the one piece of information that matters about a backup.
                 "looks_empty": archive_bytes < _MIN_USEFUL_ARCHIVE_BYTES,
@@ -132,14 +177,66 @@ def disk_usage() -> Optional[Dict[str, int]]:
     return None
 
 
+_FREQUENCY_LABELS = {
+    "weekly": "every week",
+    "fortnightly": "every two weeks",
+    "monthly": "every month",
+}
+
+
+def effective_policy() -> Dict[str, Any]:
+    """What the next backup will actually do, and what it will cost.
+
+    The backup runs on the host and this app cannot start one, so the panel's
+    job is to make the standing policy legible: what is included, how often,
+    where it goes, and what that costs. Everything here is read-only.
+    """
+    from app.services.app_settings import get_app_settings
+
+    settings = get_app_settings(create=False)
+    include = bool(getattr(settings, "backup_include_deliverables", False)) if settings else False
+    frequency = str(getattr(settings, "backup_deliverables_frequency", "") or "monthly") if settings else "monthly"
+    destination = str(getattr(settings, "backup_deliverables_dest", "") or "") if settings else ""
+    deliverables_bytes = 0
+    if include:
+        # What one deliverables archive would cost, before compression. The
+        # honest number for "should I turn this on?".
+        deliverables_bytes = _dir_size_bytes("/data/deliverables")
+    return {
+        "database_included": True,
+        "deliverables_included": include,
+        "deliverables_frequency": frequency,
+        "deliverables_frequency_label": _FREQUENCY_LABELS.get(frequency, frequency),
+        "deliverables_destination": destination,
+        # Empty destination means the archive lands beside the database backup,
+        # which is the same disk as the data it protects.
+        "deliverables_offsite": bool(destination),
+        "deliverables_estimated_bytes": deliverables_bytes,
+        "retention_days": getattr(settings, "backup_retention_days", None) if settings else None,
+        "keep_full": getattr(settings, "backup_keep_full", None) if settings else None,
+        "keep_db": getattr(settings, "backup_keep_db", None) if settings else None,
+    }
+
+
 def summary(limit: int = 50) -> Dict[str, Any]:
     """Everything the dashboard needs, in one call."""
     rows = list_backups(limit=limit)
+    try:
+        policy = effective_policy()
+    except Exception:
+        # The panel is diagnostic. It must render even when settings cannot be
+        # read, because that is exactly when somebody is looking at it.
+        policy = None
     return {
         "available": backups_available(),
         "backups": rows,
         "count": len(rows),
         "total_bytes": sum(int(r.get("size_bytes") or 0) for r in rows),
+        "full_count": sum(1 for r in rows if r.get("kind") == "full"),
+        "database_count": sum(1 for r in rows if r.get("kind") != "full"),
+        "offsite_bytes": sum(int(r.get("deliverables_bytes") or 0) for r in rows if r.get("deliverables_elsewhere")),
         "latest": rows[0] if rows else None,
+        "latest_full": next((r for r in rows if r.get("kind") == "full"), None),
+        "policy": policy,
         "disk": disk_usage(),
     }

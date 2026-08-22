@@ -130,7 +130,18 @@ fi
 
 # ------------------------------------------------------------ deliverables ---
 if [ "$DO_DELIVERABLES" -eq 1 ]; then
+  # The archive is normally beside the database dump, but a backup taken with a
+  # separate deliverables destination keeps it on another drive and records an
+  # absolute pointer in the manifest. Follow that when it is there, so a restore
+  # works the same either way.
   DTAR="${BACKUP_DIR}/deliverables.tar.gz"
+  if [ ! -s "$DTAR" ] && [ -f "${BACKUP_DIR}/manifest.env" ]; then
+    MANIFEST_DTAR="$(sed -n 's/^DELIVERABLES_ARCHIVE=//p' "${BACKUP_DIR}/manifest.env" | tail -n 1)"
+    if [ -n "$MANIFEST_DTAR" ]; then
+      [ -s "$MANIFEST_DTAR" ] || die "This backup keeps its deliverables at ${MANIFEST_DTAR}, which is missing or empty. If that drive is not mounted, mount it and run this again; the database half of the backup is unaffected."
+      DTAR="$MANIFEST_DTAR"
+    fi
+  fi
   [ -s "$DTAR" ] || die "Deliverables archive missing/empty: ${DTAR}"
   : "${DELIVERABLES_DIR:?DELIVERABLES_DIR missing in ${ENV_FILE}}"
   warn "This will overlay ${DTAR} onto ${DELIVERABLES_DIR} (existing files with same names are overwritten)."

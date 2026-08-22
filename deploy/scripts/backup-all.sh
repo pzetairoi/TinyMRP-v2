@@ -19,8 +19,8 @@ FORWARD_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --continue-on-error) CONTINUE_ON_ERROR=1; shift ;;
-    --dest|--keep-days|--keep-count|--keep-full|--keep-db|--max-total-gb|--min-free-gb|--min-free-pct) FORWARD_ARGS+=("$1" "${2:?}"); shift 2 ;;
-    --no-deliverables|--raw|--dry-run) FORWARD_ARGS+=("$1"); shift ;;
+    --dest|--keep-days|--keep-count|--keep-full|--keep-db|--max-total-gb|--min-free-gb|--min-free-pct|--deliverables-dest|--deliverables-frequency) FORWARD_ARGS+=("$1" "${2:?}"); shift 2 ;;
+    --no-deliverables|--with-deliverables|--raw|--dry-run) FORWARD_ARGS+=("$1"); shift ;;
     -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Unknown argument: $1" ;;
   esac

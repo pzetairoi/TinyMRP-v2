@@ -124,12 +124,42 @@ command -v openssl >/dev/null 2>&1 || die "openssl is required to generate secre
 
 if [[ "${TINYMRP_NON_INTERACTIVE:-0}" == "1" ]]; then
   deliverables="${TINYMRP_DELIVERABLES_PATH:?TINYMRP_DELIVERABLES_PATH is required in non-interactive mode}"
+  backup_deliverables="${TINYMRP_BACKUP_DELIVERABLES:-no}"
+  backup_deliverables_dest="${TINYMRP_BACKUP_DELIVERABLES_DEST:-}"
   mode="${TINYMRP_ACCESS_MODE:-localhost}"
   port="${TINYMRP_APP_PORT:-5000}"
   admin_email="${TINYMRP_ADMIN_EMAIL:?TINYMRP_ADMIN_EMAIL is required in non-interactive mode}"
   admin_password="${TINYMRP_ADMIN_PASSWORD:?TINYMRP_ADMIN_PASSWORD is required in non-interactive mode}"
 else
   deliverables="$(prompt 'Deliverables folder' "$HOME/TinyMRP/Deliverables")"
+  # Deliverables default to NOT being backed up. The database is a few MB and
+  # cannot be reconstructed; the deliverables are many GB and CAD can regenerate
+  # them. Backing both up nightly is how a disk fills.
+  printf '
+The database is always backed up - it is small and irreplaceable.
+'
+  printf 'Deliverables are much larger and can usually be regenerated from CAD,
+'
+  printf 'so they are NOT backed up unless you ask.
+
+'
+  backup_deliverables="$(prompt 'Also back up deliverables? (yes/no)' 'no')"
+  backup_deliverables_dest=""
+  case "$backup_deliverables" in
+    y|Y|yes|YES|Yes)
+      backup_deliverables="yes"
+      # Somewhere else on purpose. A backup on the same disk as the data it
+      # protects covers a mistake, not a dead drive.
+      printf '
+Choose a folder on ANOTHER drive if you can: a backup on the same
+'
+      printf 'disk as the data protects you from a mistake, not from losing the disk.
+
+'
+      backup_deliverables_dest="$(prompt 'Deliverables backup folder' "$HOME/TinyMRP/Backups/Deliverables")"
+      ;;
+    *) backup_deliverables="no" ;;
+  esac
   explain_access_modes
   mode="$(prompt 'Access mode (localhost/lan/domain)' 'localhost')"
 fi
@@ -329,6 +359,8 @@ write_env_value TINYMRP_URL "$url"
 write_env_value TINYMRP_TRUSTED_PROXY_HOPS "$proxy_hops"
 write_env_value TINYMRP_ALLOWED_ORIGINS "$origin"
 write_env_value DELIVERABLES_PATH "$deliverables"
+write_env_value BACKUP_INCLUDE_DELIVERABLES "$([[ "$backup_deliverables" == "yes" ]] && echo true || echo false)"
+write_env_value BACKUP_DELIVERABLES_DEST "$backup_deliverables_dest"
 write_env_value MONGO_DB tinymrp
 write_env_value MONGO_ROOT_USER tinymrp_root
 write_env_value MONGO_ROOT_PASSWORD "$(openssl rand -hex 32)"

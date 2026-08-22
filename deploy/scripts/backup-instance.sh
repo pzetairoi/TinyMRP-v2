@@ -21,6 +21,22 @@
 #   --min-free-gb N    default 5   \ the floor that actually matters: keep at
 #   --min-free-pct N   default 10  / least this much of the DISK free
 #
+# What is captured:
+#   The database always. Deliverables ONLY when the policy says so - they are
+#   many GB against a few MB and CAD can usually regenerate them, so they are
+#   off unless somebody asks.
+#     --with-deliverables          force them into THIS run
+#     --no-deliverables            force them out of THIS run
+#     --deliverables-frequency X   weekly | fortnightly | monthly
+#     --deliverables-dest DIR      write the archive to another drive; the
+#                                  backup folder records a pointer and
+#                                  restore-instance.sh follows it
+#
+# The policy comes from the app's own settings when they can be read, falling
+# back to the instance env file and then to these flags. The command line wins
+# over the dashboard for a single run: the person at the terminal is deciding
+# about THIS backup.
+#
 # Full and database-only backups are counted separately because they differ by
 # three orders of magnitude - ~2 GB against ~2 MB - and they used to share one
 # budget. A single full backup could evict a month of cheap daily restore
@@ -70,7 +86,17 @@ MAX_TOTAL_GB=10
 # wins, so it scales with the host instead of being wrong after a resize.
 MIN_FREE_GB=5
 MIN_FREE_PCT=10
+# Deliverables are OFF unless somebody asks. They are the expensive half by
+# three orders of magnitude and, unlike the database, CAD can regenerate them.
+# --no-deliverables still forces them off for one run.
+POLICY_DELIVERABLES=""
+DELIVERABLES_FREQUENCY="monthly"
+# Empty keeps the deliverables archive beside the database backup, which means
+# on the same disk as the data it protects. Setting it puts them elsewhere.
+DELIVERABLES_DEST_ROOT=""
 WITH_DELIVERABLES=1
+FORCE_DELIVERABLES=0
+NO_DELIVERABLES=0
 WITH_RAW=0
 DRY_RUN=0
 
@@ -84,7 +110,10 @@ while [ $# -gt 0 ]; do
     --max-total-gb) MAX_TOTAL_GB="${2:?}"; shift 2 ;;
     --min-free-gb) MIN_FREE_GB="${2:?}"; shift 2 ;;
     --min-free-pct) MIN_FREE_PCT="${2:?}"; shift 2 ;;
-    --no-deliverables) WITH_DELIVERABLES=0; shift ;;
+    --deliverables-dest) DELIVERABLES_DEST_ROOT="${2:?}"; shift 2 ;;
+    --deliverables-frequency) DELIVERABLES_FREQUENCY="${2:?}"; shift 2 ;;
+    --with-deliverables) WITH_DELIVERABLES=1; FORCE_DELIVERABLES=1; shift ;;
+    --no-deliverables) WITH_DELIVERABLES=0; NO_DELIVERABLES=1; shift ;;
     --raw) WITH_RAW=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -116,7 +145,18 @@ backup_kind() {
   # A backup carrying deliverables is "full"; otherwise it is database-only.
   # Read from the archive itself, so no directory naming changed and restore,
   # rollback and the backups dashboard keep reading the layout they always did.
-  if [ -f "$1/deliverables.tar.gz" ]; then printf 'full\n'; else printf 'db\n'; fi
+  #
+  # The archive may live on another filesystem, in which case the folder holds
+  # only a pointer to it. Checking for the local file alone would classify
+  # every off-drive full backup as database-only, and retention would then
+  # keep thirty of them.
+  if [ -f "$1/deliverables.tar.gz" ]; then
+    echo full
+  elif grep -qs "^DELIVERABLES_ARCHIVE=" "$1/manifest.env"; then
+    echo full
+  else
+    echo db
+  fi
 }
 
 list_backups_newest_first() {
@@ -200,6 +240,86 @@ estimated_backup_kb() {
   echo $(( ${kb:-0} * 12 / 10 ))
 }
 
+
+# --- policy from the application ---------------------------------------------
+# The backup runs on the host, but WHAT to back up is an operator decision made
+# in the admin dashboard. The app cannot run this script - read-only backups
+# mount, no docker socket, unprivileged user, and granting any of those would
+# turn a web RCE into a host compromise - so the direction is reversed: the app
+# records the policy in its own database and the script reads it here.
+#
+# Precedence, weakest first:
+#   built-in default  <  instance env file  <  admin dashboard
+#
+# Anything the dashboard has not set stays as it was. That is what lets an
+# existing installation keep behaving exactly as it does today until somebody
+# deliberately changes something, and it is why every read below is guarded:
+# an unreachable or unmigrated database must leave the backup running, not
+# stop it.
+
+policy_value() {
+  # Echo one field of the app_settings document, or nothing.
+  local field="$1"
+  docker exec "$MONGO_CONTAINER_NAME" mongosh --quiet "${MONGO_AUTH_ARGS[@]}" \
+    "$MONGO_DB" --eval \
+    "const d=db.app_settings.findOne({},{${field}:1}); if(d && d.${field}!==null && d.${field}!==undefined) print(d.${field});" \
+    2>/dev/null | tr -d '\r' | tail -n 1
+}
+
+apply_backup_policy() {
+  command -v docker >/dev/null 2>&1 || return 0
+  docker exec "$MONGO_CONTAINER_NAME" sh -c 'command -v mongosh' >/dev/null 2>&1 || {
+    info "  policy: dashboard settings unreadable (no mongosh); using flags and ${ENV_FILE##*/}"
+    return 0
+  }
+  local value
+  value="$(policy_value backup_include_deliverables || true)"
+  case "$value" in
+    true)  POLICY_DELIVERABLES=1 ;;
+    false) POLICY_DELIVERABLES=0 ;;
+  esac
+  value="$(policy_value backup_deliverables_frequency || true)"
+  case "$value" in
+    weekly|fortnightly|monthly) DELIVERABLES_FREQUENCY="$value" ;;
+  esac
+  value="$(policy_value backup_deliverables_dest || true)"
+  [ -n "$value" ] && DELIVERABLES_DEST_ROOT="$value"
+  value="$(policy_value backup_retention_days || true)"
+  [ -n "$value" ] && [ "$value" -ge 0 ] 2>/dev/null && KEEP_DAYS="$value"
+  value="$(policy_value backup_keep_full || true)"
+  [ -n "$value" ] && [ "$value" -ge 0 ] 2>/dev/null && KEEP_FULL="$value"
+  value="$(policy_value backup_keep_db || true)"
+  [ -n "$value" ] && [ "$value" -ge 0 ] 2>/dev/null && KEEP_DB="$value"
+  value="$(policy_value backup_min_free_gb || true)"
+  [ -n "$value" ] && [ "$value" -ge 0 ] 2>/dev/null && MIN_FREE_GB="$value"
+  value="$(policy_value backup_min_free_pct || true)"
+  [ -n "$value" ] && [ "$value" -ge 0 ] 2>/dev/null && MIN_FREE_PCT="$value"
+  return 0
+}
+
+# How long between full backups, in days, for the configured frequency.
+deliverables_interval_days() {
+  case "${DELIVERABLES_FREQUENCY:-monthly}" in
+    weekly)      echo 7 ;;
+    fortnightly) echo 14 ;;
+    *)           echo 30 ;;
+  esac
+}
+
+# Whether THIS run should carry deliverables. The weekly timer fires regardless;
+# the frequency is enforced here, so "monthly" needs no systemd change and can
+# be altered from the dashboard without host access.
+deliverables_due() {
+  local interval newest age_days
+  interval="$(deliverables_interval_days)"
+  local -a full_list
+  mapfile -t full_list < <(list_backups_of_kind_newest_first full)
+  [ "${#full_list[@]}" -gt 0 ] || return 0
+  newest="${full_list[0]}"
+  age_days=$(( ( $(date +%s) - $(stat -c %Y "$newest" 2>/dev/null || echo 0) ) / 86400 ))
+  [ "$age_days" -ge "$interval" ]
+}
+
 if [ "$DRY_RUN" -eq 1 ]; then
   info "[dry-run] Would back up instance '${INSTANCE_NAME}' to ${BACKUP_DIR}"
   info "[dry-run]   mongodump: docker exec ${MONGO_CONTAINER_NAME} mongodump -d ${MONGO_DB} --archive --gzip"
@@ -214,11 +334,60 @@ if ! docker inspect -f '{{.State.Running}}' "$MONGO_CONTAINER_NAME" 2>/dev/null 
   die "Mongo container '${MONGO_CONTAINER_NAME}' is not running."
 fi
 
+# Ask the application what it wants backed up, before anything else reads
+# WITH_DELIVERABLES - the pre-flight sizes the run from it.
+apply_backup_policy
+
+# The command line still wins over the dashboard for a single run: an operator
+# typing --no-deliverables or --with-deliverables is making a decision about
+# THIS backup, and a stored preference must not override the person at the
+# terminal.
+if [ "$NO_DELIVERABLES" -eq 1 ]; then
+  WITH_DELIVERABLES=0
+elif [ "$FORCE_DELIVERABLES" -eq 1 ]; then
+  WITH_DELIVERABLES=1
+elif [ -n "$POLICY_DELIVERABLES" ]; then
+  WITH_DELIVERABLES="$POLICY_DELIVERABLES"
+fi
+
+# Frequency only ever REMOVES work: it can turn a deliverables run into a
+# database-only one, never the other way round.
+if [ "$WITH_DELIVERABLES" -eq 1 ] && [ "$FORCE_DELIVERABLES" -ne 1 ]; then
+  if ! deliverables_due; then
+    info "  deliverables: not due yet (${DELIVERABLES_FREQUENCY}); taking a database-only backup"
+    WITH_DELIVERABLES=0
+  fi
+fi
+
+if [ "$WITH_DELIVERABLES" -eq 1 ]; then
+  info "  deliverables: included (${DELIVERABLES_FREQUENCY}${DELIVERABLES_DEST_ROOT:+, to ${DELIVERABLES_DEST_ROOT}})"
+else
+  info "  deliverables: not included; this is a database-only backup"
+fi
+
 # Make room BEFORE writing anything. Pruning only afterwards cannot prevent the
 # failure it is meant to prevent - the disk fills while the archive is being
 # written, and a half-written backup can take the old ones down with it.
 ensure_dir "${DEST_ROOT}/${INSTANCE_NAME}"
 NEEDED_KB="$(estimated_backup_kb)"
+# A second destination is a second filesystem, and the floor above only knows
+# about the first. Without this the script would cheerfully fill the backup
+# drive while reporting the database drive was fine.
+if [ "$WITH_DELIVERABLES" -eq 1 ] && [ -n "$DELIVERABLES_DEST_ROOT" ]; then
+  ensure_dir "${DELIVERABLES_DEST_ROOT}/${INSTANCE_NAME}"
+  DELIVERABLES_FREE_KB="$(df -Pk "$DELIVERABLES_DEST_ROOT" 2>/dev/null | awk 'NR==2 {print $4}')"
+  DELIVERABLES_TOTAL_KB="$(df -Pk "$DELIVERABLES_DEST_ROOT" 2>/dev/null | awk 'NR==2 {print $2}')"
+  DELIVERABLES_FLOOR_KB=$(( MIN_FREE_GB * 1024 * 1024 ))
+  DELIVERABLES_PCT_KB=$(( ${DELIVERABLES_TOTAL_KB:-0} * MIN_FREE_PCT / 100 ))
+  [ "$DELIVERABLES_PCT_KB" -gt "$DELIVERABLES_FLOOR_KB" ] && DELIVERABLES_FLOOR_KB="$DELIVERABLES_PCT_KB"
+  # Sized from the deliverables tree itself: there may be no previous archive
+  # on this drive to compare against. Compression makes this an over-estimate,
+  # which is the safe direction.
+  DELIVERABLES_NEEDED_KB="$(du -sk "$DELIVERABLES_DIR" 2>/dev/null | cut -f1)"
+  if [ "${DELIVERABLES_FREE_KB:-0}" -lt $(( DELIVERABLES_FLOOR_KB + ${DELIVERABLES_NEEDED_KB:-0} )) ]; then
+    die "Not enough room on the deliverables backup drive ${DELIVERABLES_DEST_ROOT}: needs up to $(( ${DELIVERABLES_NEEDED_KB:-0} / 1048576 )) GB plus a $(( DELIVERABLES_FLOOR_KB / 1048576 )) GB floor, $(( ${DELIVERABLES_FREE_KB:-0} / 1048576 )) GB free. Nothing was written. Free space on that drive, or turn deliverables off for now."
+  fi
+fi
 if ! free_space_until "$NEEDED_KB"; then
   die "Not enough disk for a backup of '${INSTANCE_NAME}': needs ~$(( NEEDED_KB / 1048576 )) GB plus a $(( $(min_free_kb) / 1048576 )) GB floor, $(( $(fs_free_kb) / 1048576 )) GB free after pruning. Existing backups were KEPT and nothing was written. Free disk space, or lower --min-free-gb/--min-free-pct."
 fi
@@ -257,10 +426,24 @@ fi
 info "  mongodump captured $((DUMP_BYTES / 1024)) KiB of data"
 
 # 2) Deliverables snapshot
+#
+# When a separate destination is configured the archive is written THERE and the
+# backup folder records a pointer to it. The whole point of the setting is to
+# put gigabytes of engineering files on a different drive from the database
+# backup, so the two halves genuinely live apart; restore-instance.sh reads the
+# pointer rather than assuming they sit together.
+DELIVERABLES_ARCHIVE=""
 if [ "$WITH_DELIVERABLES" -eq 1 ]; then
   if [ -n "${DELIVERABLES_DIR:-}" ] && [ -d "$DELIVERABLES_DIR" ]; then
-    info "  deliverables (${DELIVERABLES_DIR})"
-    tar -czf "${BACKUP_DIR}/deliverables.tar.gz" -C "$DELIVERABLES_DIR" .
+    if [ -n "$DELIVERABLES_DEST_ROOT" ]; then
+      DELIVERABLES_ARCHIVE="${DELIVERABLES_DEST_ROOT}/${INSTANCE_NAME}/${STAMP}/deliverables.tar.gz"
+      ensure_dir "$(dirname "$DELIVERABLES_ARCHIVE")"
+      info "  deliverables (${DELIVERABLES_DIR}) -> ${DELIVERABLES_ARCHIVE}"
+    else
+      DELIVERABLES_ARCHIVE="${BACKUP_DIR}/deliverables.tar.gz"
+      info "  deliverables (${DELIVERABLES_DIR})"
+    fi
+    tar -czf "$DELIVERABLES_ARCHIVE" -C "$DELIVERABLES_DIR" .
   else
     # A silently skipped snapshot produced a "successful" backup holding only a
     # database dump. Loud and non-zero, so a scheduled job cannot keep
@@ -296,7 +479,12 @@ CURRENT_IMAGE="$(docker inspect -f '{{.Config.Image}}' "${APP_CONTAINER_NAME:-no
   echo "WITH_DELIVERABLES=${WITH_DELIVERABLES}"
   echo "WITH_RAW=${WITH_RAW}"
   echo "MONGO_ARCHIVE_BYTES=$(stat -c%s "${BACKUP_DIR}/mongo.archive.gz")"
-  [ -f "${BACKUP_DIR}/deliverables.tar.gz" ] && echo "DELIVERABLES_BYTES=$(stat -c%s "${BACKUP_DIR}/deliverables.tar.gz")"
+  # The pointer restore follows. Absolute, because the archive may be on
+  # another filesystem entirely; absent when this was a database-only backup.
+  if [ -n "$DELIVERABLES_ARCHIVE" ] && [ -f "$DELIVERABLES_ARCHIVE" ]; then
+    echo "DELIVERABLES_BYTES=$(stat -c%s "$DELIVERABLES_ARCHIVE")"
+    echo "DELIVERABLES_ARCHIVE=${DELIVERABLES_ARCHIVE}"
+  fi
   [ -f "${BACKUP_DIR}/mongo-raw.tar.gz" ] && echo "MONGO_RAW_BYTES=$(stat -c%s "${BACKUP_DIR}/mongo-raw.tar.gz")"
 } > "${BACKUP_DIR}/manifest.env"
 

@@ -91,6 +91,33 @@
     {% endif %}
     {% endif %}
 
+    {% set pol = backup_summary.policy %}
+    {% if pol %}
+    <div class="border rounded p-2 mb-2 small">
+      <div class="fw-semibold mb-1">What gets backed up</div>
+      <div>
+        <span class="badge bg-success">Database</span>
+        every day — small, and the one thing CAD cannot regenerate.
+      </div>
+      <div class="mt-1">
+        {% if pol.deliverables_included %}
+        <span class="badge bg-success">Deliverables</span>
+        {{ pol.deliverables_frequency_label }}, about
+        <strong>{{ human_bytes(pol.deliverables_estimated_bytes) }}</strong> per copy.
+        {% if pol.deliverables_offsite %}
+        Written to <code>{{ pol.deliverables_destination }}</code>.
+        {% else %}
+        <span class="text-warning-emphasis">Stored beside the database backup — the
+        same disk as the files it protects.</span>
+        {% endif %}
+        {% else %}
+        <span class="badge bg-secondary">Deliverables</span>
+        not backed up. They are large and can usually be regenerated from CAD, so
+        they stay off unless someone turns them on.
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
     {% if backup_summary.count == 0 %}
     <div class="alert alert-warning py-2 small mb-0">
       <strong>No backups found.</strong> If this instance holds real data, install the
@@ -100,20 +127,37 @@
     {% else %}
     <p class="small text-muted">
       {{ backup_summary.count }} backup{{ '' if backup_summary.count == 1 else 's' }},
-      most recent first. Restoring one is a host action —
-      <code>restore-instance.sh</code> — so this page only reports.
+      most recent first
+      ({{ backup_summary.full_count }} with files, {{ backup_summary.database_count }} database-only).
+      Restoring one is a host action — this page only reports:
     </p>
+    <pre class="small bg-body-tertiary p-2 rounded mb-2"><code>sudo ./deploy/scripts/restore-instance.sh &lt;instance&gt; /srv/tinymrp/backups/&lt;instance&gt;/&lt;backup&gt;</code></pre>
     <div class="table-responsive">
       <table class="table table-sm align-middle">
-        <thead><tr><th scope="col">Backup</th><th scope="col">Taken</th><th scope="col" class="text-end">Size</th></tr></thead>
+        <thead><tr><th scope="col">Backup</th><th scope="col">Holds</th><th scope="col">Taken</th><th scope="col" class="text-end">Size</th></tr></thead>
         <tbody>
           {% for row in backup_summary.backups %}
           <tr>
             <td><code>{{ row.name }}</code>
               {% if row.looks_empty %}<span class="badge bg-danger ms-1">looks empty</span>{% endif %}
             </td>
+            <td class="small">
+              {% if row.kind == 'full' %}
+              <span class="badge bg-primary">Database + files</span>
+              {% if row.deliverables_elsewhere %}
+              <div class="text-muted">files on <code>{{ row.deliverables_elsewhere }}</code></div>
+              {% endif %}
+              {% else %}
+              <span class="badge bg-secondary">Database only</span>
+              {% endif %}
+            </td>
             <td class="small text-muted">{{ row.created_at.strftime('%Y-%m-%d %H:%M UTC') if row.created_at else '—' }}</td>
-            <td class="text-end">{{ human_bytes(row.size_bytes) }}</td>
+            <td class="text-end">
+              {{ human_bytes(row.size_bytes) }}
+              {% if row.deliverables_elsewhere and row.deliverables_bytes %}
+              <div class="small text-muted">+ {{ human_bytes(row.deliverables_bytes) }} off-drive</div>
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>
