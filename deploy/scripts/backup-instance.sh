@@ -94,6 +94,7 @@ DELIVERABLES_FREQUENCY="monthly"
 # Empty keeps the deliverables archive beside the database backup, which means
 # on the same disk as the data it protects. Setting it puts them elsewhere.
 DELIVERABLES_DEST_ROOT=""
+DELIVERABLES_SKIPPED_BY_FREQUENCY=0
 WITH_DELIVERABLES=1
 FORCE_DELIVERABLES=0
 NO_DELIVERABLES=0
@@ -320,22 +321,9 @@ deliverables_due() {
   [ "$age_days" -ge "$interval" ]
 }
 
-if [ "$DRY_RUN" -eq 1 ]; then
-  info "[dry-run] Would back up instance '${INSTANCE_NAME}' to ${BACKUP_DIR}"
-  info "[dry-run]   mongodump: docker exec ${MONGO_CONTAINER_NAME} mongodump -d ${MONGO_DB} --archive --gzip"
-  [ "$WITH_DELIVERABLES" -eq 1 ] && info "[dry-run]   deliverables: tar of ${DELIVERABLES_DIR:-<unset>}"
-  [ "$WITH_RAW" -eq 1 ] && info "[dry-run]   raw mongo files: stop instance, tar ${MONGO_DATA_DIR:-<unset>}, start instance"
-  info "[dry-run]   retention: expire FULL backups older than ${KEEP_DAYS} days; keep at most ${KEEP_FULL} full and ${KEEP_DB} database-only backups"
-  info "[dry-run]   free-space floor: keep the greater of ${MIN_FREE_GB} GB or ${MIN_FREE_PCT}% free; the newest full and newest database-only backup are never pruned"
-  exit 0
-fi
-
-if ! docker inspect -f '{{.State.Running}}' "$MONGO_CONTAINER_NAME" 2>/dev/null | grep -q true; then
-  die "Mongo container '${MONGO_CONTAINER_NAME}' is not running."
-fi
-
-# Ask the application what it wants backed up, before anything else reads
-# WITH_DELIVERABLES - the pre-flight sizes the run from it.
+# Resolve the policy BEFORE anything reports or acts on it. --dry-run is the
+# command the documentation tells people to run to see what a backup will do,
+# so it has to answer with the policy applied, not with the built-in defaults.
 apply_backup_policy
 
 # The command line still wins over the dashboard for a single run: an operator
@@ -354,13 +342,35 @@ fi
 # database-only one, never the other way round.
 if [ "$WITH_DELIVERABLES" -eq 1 ] && [ "$FORCE_DELIVERABLES" -ne 1 ]; then
   if ! deliverables_due; then
-    info "  deliverables: not due yet (${DELIVERABLES_FREQUENCY}); taking a database-only backup"
+    DELIVERABLES_SKIPPED_BY_FREQUENCY=1
     WITH_DELIVERABLES=0
   fi
 fi
 
+if [ "$DRY_RUN" -eq 1 ]; then
+  info "[dry-run] Would back up instance '${INSTANCE_NAME}' to ${BACKUP_DIR}"
+  info "[dry-run]   mongodump: docker exec ${MONGO_CONTAINER_NAME} mongodump -d ${MONGO_DB} --archive --gzip"
+  if [ "$WITH_DELIVERABLES" -eq 1 ]; then
+    info "[dry-run]   deliverables: tar of ${DELIVERABLES_DIR:-<unset>} -> ${DELIVERABLES_DEST_ROOT:-alongside the database backup}"
+  elif [ "${DELIVERABLES_SKIPPED_BY_FREQUENCY:-0}" -eq 1 ]; then
+    info "[dry-run]   deliverables: NOT included - not due yet (${DELIVERABLES_FREQUENCY})"
+  else
+    info "[dry-run]   deliverables: NOT included - database-only backup"
+  fi
+  [ "$WITH_RAW" -eq 1 ] && info "[dry-run]   raw mongo files: stop instance, tar ${MONGO_DATA_DIR:-<unset>}, start instance"
+  info "[dry-run]   retention: expire FULL backups older than ${KEEP_DAYS} days; keep at most ${KEEP_FULL} full and ${KEEP_DB} database-only backups"
+  info "[dry-run]   free-space floor: keep the greater of ${MIN_FREE_GB} GB or ${MIN_FREE_PCT}% free; the newest full and newest database-only backup are never pruned"
+  exit 0
+fi
+
+if ! docker inspect -f '{{.State.Running}}' "$MONGO_CONTAINER_NAME" 2>/dev/null | grep -q true; then
+  die "Mongo container '${MONGO_CONTAINER_NAME}' is not running."
+fi
+
 if [ "$WITH_DELIVERABLES" -eq 1 ]; then
   info "  deliverables: included (${DELIVERABLES_FREQUENCY}${DELIVERABLES_DEST_ROOT:+, to ${DELIVERABLES_DEST_ROOT}})"
+elif [ "${DELIVERABLES_SKIPPED_BY_FREQUENCY:-0}" -eq 1 ]; then
+  info "  deliverables: not due yet (${DELIVERABLES_FREQUENCY}); taking a database-only backup"
 else
   info "  deliverables: not included; this is a database-only backup"
 fi
