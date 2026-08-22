@@ -150,6 +150,34 @@ something to allocate from on day one. It is a starting point, not a fixture:
   imported from CAD are unaffected — they carry the numbers CAD already gave
   them.
 
+### Stopping a scheme at a last number
+
+A scheme's counter can be given an optional **maximum**. Once the counter passes
+it, allocation refuses with *“This scheme stops at N; its last number has already
+been issued”* and **no part is created** — the run allocates nothing rather than
+issuing a number the scheme's own rule forbids.
+
+Leave the maximum at **0** for no limit. That is the default, and it is what
+every scheme created before this option existed does, so nothing changes unless
+you set one. The maximum cannot be below the counter's start value.
+
+Use it to hand a block of numbers to a project or a supplier and know the block
+cannot be overrun. To carry on afterwards, raise the limit or create a second
+scheme.
+
+## Upload pack housekeeping
+
+Every *Create upload pack* from the add-in leaves a timestamped ZIP in the
+`bom` folder of your deliverables storage. Nothing reads them once the import
+has run, so they accumulate — one instance had built up 1,258 of them.
+
+Packs older than **7 days** are moved into `bom/archive`. They are **moved,
+never deleted**: the pack is the only record of what an import contained, so
+the disk cost is unchanged and only the working folder gets tidier.
+
+The sweep runs after an import, at most once a day, so there is nothing to
+schedule or install. Set the retention to **0** to switch it off entirely.
+
 ## Audit And Metrics
 
 ### Audit (`/admin/audit/`)

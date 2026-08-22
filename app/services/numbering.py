@@ -28,6 +28,10 @@ DEFAULT_SEQ = {
     "base": 10,
     "start_at": 1,
     "reset_policy": "never",
+    # Optional ceiling for the automatic counter. 0 means no ceiling, which is
+    # what every scheme written before this existed resolves to, so the default
+    # behaviour is exactly unchanged.
+    "max_value": 0,
 }
 
 # New parts stay revision-less unless the scheme explicitly opts into a revision policy:
@@ -88,6 +92,7 @@ def normalize_scheme_payload(
     seq["padding"] = _coerce_int(seq.get("padding"), DEFAULT_SEQ["padding"])
     seq["base"] = _coerce_int(seq.get("base"), DEFAULT_SEQ["base"])
     seq["start_at"] = _coerce_int(seq.get("start_at"), DEFAULT_SEQ["start_at"])
+    seq["max_value"] = _coerce_int(seq.get("max_value"), DEFAULT_SEQ["max_value"])
     seq["auto_sequence_index"] = _coerce_int(seq.get("auto_sequence_index"), 0)
     seq["reset_policy"] = str(seq.get("reset_policy") or DEFAULT_SEQ["reset_policy"]).strip()
 
@@ -148,6 +153,12 @@ def validate_scheme_definition(scheme: Dict[str, Any]) -> Tuple[List[str], List[
     start_at = _coerce_int(seq.get("start_at"), DEFAULT_SEQ["start_at"])
     if start_at <= 0:
         errors.append("seq.start_at must be > 0.")
+
+    max_value = _coerce_int(seq.get("max_value"), DEFAULT_SEQ["max_value"])
+    if max_value < 0:
+        errors.append("seq.max_value must be 0 (no limit) or greater.")
+    elif max_value and max_value < start_at:
+        errors.append("seq.max_value must not be below seq.start_at.")
 
     reset_policy = str(seq.get("reset_policy") or DEFAULT_SEQ["reset_policy"])
     if reset_policy not in ALLOWED_RESET_POLICIES:
@@ -536,6 +547,17 @@ def allocate_number(
         )
         errors.extend(next_errors)
         if errors:
+            return {}, errors
+        # An optional ceiling on the automatic counter. Checked here, after the
+        # number is known but before any part exists, so reaching the limit
+        # allocates nothing at all rather than creating a part that breaks the
+        # scheme's own rule. 0 means no ceiling.
+        max_value = _coerce_int(seq_defaults.get("max_value"), DEFAULT_SEQ["max_value"])
+        if max_value and seq_value is not None and seq_value > max_value:
+            errors.append(
+                f"This scheme stops at {max_value}; its last number has already "
+                "been issued. Raise the limit or use another scheme."
+            )
             return {}, errors
         if auto_seq_index < len(resolved_sequence_values):
             resolved_sequence_values[auto_seq_index] = seq_value

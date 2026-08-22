@@ -359,3 +359,41 @@ def test_a_shared_datasheet_is_still_servable(client, app, user, tmp_path):
         headers={"X-Original-URI": "/deliverables/datasheet/catalog.pdf"},
     )
     assert resp.status_code == 204
+
+
+def test_bom_only_import_renders_the_thumbnail_for_a_discovered_image(app, tmp_path):
+    """Issue #97.
+
+    The add-in's ordinary pack carries no deliverables, so the import links the
+    PNG from storage. Thumbnail pairs were derived from the files the pack
+    carried, which for these packs is nothing - the image was linked but never
+    rendered, and the part showed no picture.
+    """
+    from PIL import Image
+
+    image = tmp_path / "png" / "IMP-IMG_REV_A.png"
+    image.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (400, 300), (30, 90, 200)).save(image)
+
+    zip_bytes = _make_bom_zip(
+        [{"partnumber": "IMP-IMG", "revision": "A", "description": "Imported"}],
+        ["ITEM NO.\tPART NUMBER\tRevision\tQTY.", "1\tIMP-IMG\tA\t1"],
+    )
+
+    with app.app_context():
+        app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
+        app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+        result = import_upload_pack(
+            zip_bytes,
+            "bom-only.zip",
+            seed_tag="test",
+            allow_extra=False,
+            generate_thumbs=True,
+        )
+
+        assert result["metrics"]["files_discovered"] >= 1
+        assert result["metrics"]["thumbnails_generated"] >= 1
+        record = PartFile.objects(part_number="IMP-IMG", ext_group="png").first()
+        assert record is not None
+        assert record.thumb_rel_path
+        assert (tmp_path / record.thumb_rel_path).is_file()

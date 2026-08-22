@@ -72,3 +72,35 @@ def test_rescan_route_requires_maintenance_permission(app, client):
 
     progress = client.get("/admin/rescan-files/progress")
     assert progress.status_code in (302, 401, 403)
+
+
+def _png(path: Path) -> None:
+    from PIL import Image
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (400, 300), (180, 40, 40)).save(path)
+
+
+def test_rescan_renders_thumbnails_for_the_images_it_relinks(app, tmp_path):
+    """Issue #97 backfill.
+
+    The per-part refresh has always rendered thumbnails; the bulk rescan did
+    not, so every image it relinked stayed pictureless and there was no way to
+    fix a whole estate short of refreshing each part by hand.
+    """
+    with app.app_context():
+        Part.objects.delete()
+        PartFile.objects.delete()
+        app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
+        app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+        _seed("RESCAN-IMG", "A")
+        _png(tmp_path / "png" / "RESCAN-IMG_REV_A.png")
+
+        report = file_rescan.run_now()
+
+        assert report["status"] == "done"
+        assert report.get("thumbs", 0) >= 1
+        record = PartFile.objects(part_number="RESCAN-IMG", ext_group="png").first()
+        assert record is not None
+        assert record.thumb_rel_path
+        assert (tmp_path / record.thumb_rel_path).is_file()

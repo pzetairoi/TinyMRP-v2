@@ -32,6 +32,11 @@ class AppSettings(Document):
     upload_pack_max_zip_mb = IntField(default=1024)
     upload_pack_max_file_mb = IntField(default=1024)
     upload_pack_max_files = IntField(default=5000)
+    # Upload packs land in <deliverables>/bom and are never read again once
+    # imported. Packs older than this move to bom/archive so the working folder
+    # stays legible; nothing is ever deleted. 0 disables the sweep entirely.
+    bom_pack_retention_days = IntField(default=7)
+    bom_pack_swept_at = DateTimeField()
     # Set once, the first time the built-in numbering scheme is seeded. Seeding
     # is a first-run convenience, not a guarantee: without this marker the boot
     # seeder recreated a scheme the administrator had deliberately deleted.

@@ -1922,6 +1922,26 @@ Copying an existing scheme is a convenience, never the only route.</li>
 imported from CAD are unaffected — they carry the numbers CAD already gave
 them.</li>
 </ul>
+<h3 id="stopping-a-scheme-at-a-last-number">Stopping a scheme at a last number</h3>
+<p>A scheme's counter can be given an optional <strong>maximum</strong>. Once the counter passes
+it, allocation refuses with <em>“This scheme stops at N; its last number has already
+been issued”</em> and <strong>no part is created</strong> — the run allocates nothing rather than
+issuing a number the scheme's own rule forbids.</p>
+<p>Leave the maximum at <strong>0</strong> for no limit. That is the default, and it is what
+every scheme created before this option existed does, so nothing changes unless
+you set one. The maximum cannot be below the counter's start value.</p>
+<p>Use it to hand a block of numbers to a project or a supplier and know the block
+cannot be overrun. To carry on afterwards, raise the limit or create a second
+scheme.</p>
+</div></details><details class="help-section" id="sec-upload-pack-housekeeping"><summary><span class="help-section-title" id="upload-pack-housekeeping">Upload pack housekeeping</span></summary><div class="help-section-body">
+<p>Every <em>Create upload pack</em> from the add-in leaves a timestamped ZIP in the
+<code>bom</code> folder of your deliverables storage. Nothing reads them once the import
+has run, so they accumulate — one instance had built up 1,258 of them.</p>
+<p>Packs older than <strong>7 days</strong> are moved into <code>bom/archive</code>. They are <strong>moved,
+never deleted</strong>: the pack is the only record of what an import contained, so
+the disk cost is unchanged and only the working folder gets tidier.</p>
+<p>The sweep runs after an import, at most once a day, so there is nothing to
+schedule or install. Set the retention to <strong>0</strong> to switch it off entirely.</p>
 </div></details><details class="help-section" id="sec-audit-and-metrics"><summary><span class="help-section-title" id="audit-and-metrics">Audit And Metrics</span></summary><div class="help-section-body">
 <h3 id="audit-adminaudit">Audit (<code>/admin/audit/</code>)</h3>
 <ul>

@@ -45,6 +45,7 @@ from app.services.import_zip import (
 )
 from app.services.part_materialized import sync_part_materialized_fields
 from app.services.part_norm import clean_pn, clean_rev
+from app.services.bom_packs import sweep_bom_packs_if_due
 from app.services.thumbs_gen import generate_thumbs_for_parts
 from app.services.timezone_utils import utc_iso, utc_now
 
@@ -2035,7 +2036,17 @@ def execute_import_plan(
         files_discovered = (
             int(upsert_part_files_detailed(records).get("count") or 0) if records else 0
         )
-        thumb_pairs = managed_changed if generate_thumbs else set()
+        # A discovered PNG needs its thumbnail as much as a packed one does.
+        # Deriving the pairs from `staged` alone meant BOM-only packs - the
+        # add-in's ordinary output, which carries no deliverables - linked the
+        # image but never rendered it, so the part showed no picture. Thumbnails
+        # already current are skipped, so re-imports only pay a stat call.
+        discovered_pairs = {
+            (str(record["part_number"]), str(record["revision"] or ""))
+            for record in records
+            if str(record.get("ext_group") or "").casefold() == "png"
+        }
+        thumb_pairs = (managed_changed | discovered_pairs) if generate_thumbs else set()
         thumbnails = generate_thumbs_for_parts(sorted(thumb_pairs)) if thumb_pairs else 0
         _journal_update(
             journal,
@@ -2163,6 +2174,11 @@ def import_upload_pack(
             generate_thumbs=generate_thumbs,
             idempotency_key=idempotency_key,
         )
+        # Housekeeping, after the import has committed and reported: old upload
+        # packs move to bom/archive at most once a day. Deliberately outside
+        # execute_import_plan so it can neither fail the import nor be rolled
+        # back with it.
+        sweep_bom_packs_if_due()
     elapsed = time.perf_counter() - started
     capabilities = {
         permission: actor_permissions is None or permission in actor_permissions

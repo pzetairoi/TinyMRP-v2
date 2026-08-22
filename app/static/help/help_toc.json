@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-08-22 02:08 UTC",
-  "commit": "eff76af",
+  "generated_at": "2026-08-22 03:37 UTC",
+  "commit": "bbd0baa",
   "items": [
     {
       "id": "getting-started",
@@ -295,6 +295,10 @@
         {
           "id": "add-in-admin-uiadminaddin",
           "title": "Add-in Admin (`/ui/admin/addin`)"
+        },
+        {
+          "id": "upload-pack-housekeeping",
+          "title": "Upload pack housekeeping"
         },
         {
           "id": "audit-and-metrics",

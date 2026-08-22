@@ -570,3 +570,111 @@ def test_upgrade_keeps_seeding_into_an_instance_that_never_had_a_scheme():
     ensure_presets()
 
     assert NumberingScheme.objects(name="Default: PART-SEQ6").first() is not None
+
+
+# --- issue #64: an optional ceiling on the automatic counter ---------------
+
+
+def _capped_scheme(name: str, max_value: int, start_at: int = 1) -> NumberingScheme:
+    return NumberingScheme(
+        name=name,
+        pattern_segments=[
+            {"kind": "literal", "value": "CAP"},
+            {"kind": "seq", "padding": 3, "base": 10, "start_at": start_at, "auto_counter": True},
+        ],
+        separator="-",
+        scope_mode="global",
+        seq={
+            "padding": 3,
+            "base": 10,
+            "start_at": start_at,
+            "reset_policy": "never",
+            "max_value": max_value,
+        },
+        revision={"policy": "none", "start": ""},
+        validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
+        audit={"created_at": utc_now()},
+    ).save()
+
+
+def test_allocation_stops_at_the_configured_ceiling():
+    scheme = _capped_scheme("CappedScheme", max_value=2)
+
+    first = _alloc(scheme)
+    second = _alloc(scheme)
+    result, errors = allocate_number(
+        scheme,
+        {},
+        create_part_if_missing=True,
+        requested_revision_action="new_part",
+        existing_part_number=None,
+        user_email=None,
+        cad_ref=None,
+    )
+
+    assert first.endswith("001")
+    assert second.endswith("002")
+    assert result == {}
+    assert any("stops at 2" in error for error in errors)
+
+
+def test_reaching_the_ceiling_creates_no_part():
+    """Refusal must allocate nothing, not a part that breaks the scheme."""
+    scheme = _capped_scheme("CappedNoPart", max_value=1)
+    _alloc(scheme)
+    before = Part.objects.count()
+
+    _result, errors = allocate_number(
+        scheme,
+        {},
+        create_part_if_missing=True,
+        requested_revision_action="new_part",
+        existing_part_number=None,
+        user_email=None,
+        cad_ref=None,
+    )
+
+    assert errors
+    assert Part.objects.count() == before
+
+
+def test_no_ceiling_is_the_default_and_changes_nothing():
+    """Every scheme written before this feature resolves to "no limit"."""
+    scheme = _simple_auto_scheme("UncappedScheme")
+    assert (scheme.seq or {}).get("max_value") is None
+
+    numbers = [_alloc(scheme) for _ in range(5)]
+
+    assert len(set(numbers)) == 5
+    assert numbers[-1].endswith("005")
+
+
+def test_normalize_defaults_max_value_to_no_limit():
+    payload = {
+        "name": "NoCap",
+        "separator": "-",
+        "seq": {"padding": 3, "base": 10, "start_at": 1},
+        "pattern_segments": [
+            {"kind": "literal", "value": "PART"},
+            {"kind": "seq", "padding": 3, "base": 10},
+        ],
+    }
+    scheme, errors = normalize_scheme_payload(payload, "user@example.com", None)
+    assert not errors
+    assert scheme["seq"]["max_value"] == 0
+
+
+def test_validation_rejects_a_ceiling_below_the_start():
+    payload = {
+        "name": "BadCap",
+        "separator": "-",
+        "seq": {"padding": 3, "base": 10, "start_at": 50, "max_value": 10},
+        "pattern_segments": [
+            {"kind": "literal", "value": "PART"},
+            {"kind": "seq", "padding": 3, "base": 10},
+        ],
+    }
+    scheme, errors = normalize_scheme_payload(payload, "user@example.com", None)
+    assert not errors
+    v_errors, _, _ = validate_scheme_definition(scheme)
+    assert any("max_value" in error for error in v_errors)
