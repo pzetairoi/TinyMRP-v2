@@ -1,3 +1,7 @@
+{% macro human_bytes(n) -%}
+{%- if n is none %}—{% elif n >= 1073741824 %}{{ '%.1f'|format(n / 1073741824) }} GB{% elif n >= 1048576 %}{{ '%.0f'|format(n / 1048576) }} MB{% elif n >= 1024 %}{{ '%.0f'|format(n / 1024) }} KB{% else %}{{ n }} B{% endif -%}
+{%- endmacro %}
+
 {% macro page_header(title, subtitle=None, eyebrow=None) -%}
 {% set actions = caller()|trim if caller is defined else '' %}
 <header class="tm-page-header">

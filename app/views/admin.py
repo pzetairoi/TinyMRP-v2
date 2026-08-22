@@ -181,7 +181,9 @@ def admin_index():
         try:
             from app.services.backups import summary as _backup_summary
 
-            backup_summary = _backup_summary(limit=20)
+            # The overview only asks "is anything wrong?" now that Backups has
+            # a page of its own, so it does not need to list or size anything.
+            backup_summary = _backup_summary(limit=1)
         except Exception:
             # An admin dashboard must not 500 because a directory moved.
             backup_summary = None

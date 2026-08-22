@@ -247,8 +247,20 @@ def _login(client, user):
         sess["_fresh"] = True
 
 
-def test_the_backups_page_renders_for_an_operator(client, app):
-    """It is the page somebody opens when worried, so it must always render."""
+def test_the_backups_page_renders_with_real_backups_present(client, app, backups_dir):
+    """The populated path, which is the one that actually ships.
+
+    An earlier version of this test asserted only that the page returned 200,
+    with no backups directory present - so it took the empty branch every time
+    and never rendered a single size. The page shipped calling a macro that did
+    not exist there and 500'd on the first instance that had backups.
+    """
+    _backup(backups_dir, "20260101-000000")
+    _backup(
+        backups_dir,
+        "20260102-000000",
+        manifest="DELIVERABLES_ARCHIVE=/mnt/backupdrive/x.tar.gz\nDELIVERABLES_BYTES=2048\n",
+    )
     with app.app_context():
         user = _admin(app, ["system.maintenance", "system.config.read"])
     _login(client, user)
@@ -257,9 +269,17 @@ def test_the_backups_page_renders_for_an_operator(client, app):
 
     assert response.status_code == 200
     body = response.get_data(as_text=True)
-    assert "What gets backed up" in body or "No backups directory" in body
+    assert "What gets backed up" in body
+    assert "20260102-000000" in body, "the backups themselves must be listed"
+    assert "Database + files" in body and "Database only" in body, (
+        "each backup must say what it holds"
+    )
+    assert "/mnt/backupdrive/" in body, "an off-drive archive must say where it is"
     assert "restore-instance.sh" in body, (
         "the page must show how to restore, since it deliberately has no button"
+    )
+    assert "B</" in body or "KB" in body or "MB" in body, (
+        "sizes must actually render; this is what the 500 was"
     )
 
 
@@ -297,3 +317,24 @@ def test_the_admin_navigation_links_to_backups(client, app):
 
     assert "/admin/backups" in body
     assert ">Backups</a>" in body, "no navigation entry points at the page"
+
+
+def test_the_admin_dashboard_offers_backups_alongside_the_other_tools(client, app):
+    """Backups was the only thing on that page that was not a tile.
+
+    It was a table bolted below the grid, which is both inconsistent and where
+    nobody looks. It is a tile in "System & danger zone" now, next to Metrics
+    and Rescan, and the overview only interrupts when something is wrong.
+    """
+    with app.app_context():
+        user = _admin(app, ["system.maintenance", "system.config.read"])
+    _login(client, user)
+
+    body = client.get("/admin/").get_data(as_text=True)
+
+    assert "/admin/backups" in body, "the dashboard does not offer Backups at all"
+    assert "Rescan part files" in body, "the System tiles should be unchanged"
+    assert "<table" not in body.split("System &")[-1], (
+        "the overview should not be listing backups again; that is the "
+        "Backups page's job"
+    )
