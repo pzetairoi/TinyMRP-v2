@@ -310,3 +310,17 @@ def test_the_documentation_states_the_default_and_the_drive_advice():
     for token in ("--with-deliverables", "--deliverables-dest", "fortnightly"):
         assert token in doc, f"10-operations.md does not document {token}"
 
+
+def test_the_script_default_matches_the_documented_default():
+    """"Database only, no flag needed" has to be true of the script itself.
+
+    The policy layer falls back to the script's own default when nothing is
+    stored, so a default of ON meant a fresh instance captured gigabytes of
+    files while the documentation said it would not.
+    """
+    backup = _executable_source(VPS)
+    assert "WITH_DELIVERABLES=0" in backup, (
+        "backup-instance.sh must default to database-only; anything else "
+        "contradicts the documented default on any instance with no stored policy"
+    )
+

@@ -95,7 +95,12 @@ DELIVERABLES_FREQUENCY="monthly"
 # on the same disk as the data it protects. Setting it puts them elsewhere.
 DELIVERABLES_DEST_ROOT=""
 DELIVERABLES_SKIPPED_BY_FREQUENCY=0
-WITH_DELIVERABLES=1
+# OFF by default. The database is a few MB and irreplaceable; the deliverables
+# are many GB and CAD can regenerate them, so capturing both every run is how a
+# disk fills. --with-deliverables, the instance env file or the dashboard turn
+# them on. This is the default the documentation states, and a default that
+# disagrees with its documentation is worse than either.
+WITH_DELIVERABLES=0
 FORCE_DELIVERABLES=0
 NO_DELIVERABLES=0
 WITH_RAW=0
