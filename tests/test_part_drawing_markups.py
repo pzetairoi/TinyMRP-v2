@@ -743,3 +743,79 @@ def test_legacy_annotation_migration_unchanged_by_markups(client):
     assert annotation.notes == "migrated"
     part.reload()
     assert part.attrs.get("material") == "Steel"
+
+
+# ---------------------------------------------------------------------------
+# Issue #99: a reviewer can close the thread they raised
+# ---------------------------------------------------------------------------
+
+def _collaborator_user(email="markup-collaborator@example.com"):
+    """A Customer-shaped role: markups.write, but no markups.moderate."""
+    from app.services.standard_roles import STANDARD_ROLES
+
+    role = Role(
+        name=f"collaborator-{uuid.uuid4()}",
+        permissions=[*STANDARD_ROLES["customer"].permissions, "parts.read_unreleased"],
+    ).save()
+    assert "markups.moderate" not in role.permissions
+    return _make_user(email, [role])
+
+
+def test_collaborator_can_resolve_and_delete_the_thread_they_raised(client):
+    _make_part()
+    pf = _make_drawing()
+    _login(client, _collaborator_user())
+    _put(client, pf, _canvas("obj-1"), expected_version=0)
+    thread_id = _create_thread(client, pf, ["obj-1"]).get_json()["threads"][0]["id"]
+
+    resolved = client.patch(
+        f"{_base_url()}/threads/{thread_id}",
+        json={"rev": "A", "source_file_id": str(pf.id), "action": "resolve"},
+    )
+    assert resolved.status_code == 200
+    assert resolved.get_json()["threads"][0]["status"] == "resolved"
+
+    removed = client.delete(
+        f"{_base_url()}/threads/{thread_id}",
+        json={"rev": "A", "source_file_id": str(pf.id)},
+    )
+    assert removed.status_code == 200
+    assert removed.get_json()["threads"] == []
+
+
+def test_collaborator_cannot_resolve_a_thread_someone_else_raised(client):
+    _make_part()
+    pf = _make_drawing()
+    _login(client, _viewer_user("thread-owner@example.com"))
+    _put(client, pf, _canvas("obj-1"), expected_version=0)
+    thread_id = _create_thread(client, pf, ["obj-1"]).get_json()["threads"][0]["id"]
+
+    _login(client, _collaborator_user("thread-intruder@example.com"))
+    resolved = client.patch(
+        f"{_base_url()}/threads/{thread_id}",
+        json={"rev": "A", "source_file_id": str(pf.id), "action": "resolve"},
+    )
+    removed = client.delete(
+        f"{_base_url()}/threads/{thread_id}",
+        json={"rev": "A", "source_file_id": str(pf.id)},
+    )
+
+    assert resolved.status_code == 403
+    assert removed.status_code == 403
+
+
+def test_moderator_can_still_resolve_a_thread_someone_else_raised(client):
+    _make_part()
+    pf = _make_drawing()
+    _login(client, _collaborator_user("raised-by@example.com"))
+    _put(client, pf, _canvas("obj-1"), expected_version=0)
+    thread_id = _create_thread(client, pf, ["obj-1"]).get_json()["threads"][0]["id"]
+
+    _login(client, _viewer_user("markup-moderator@example.com"))
+    resolved = client.patch(
+        f"{_base_url()}/threads/{thread_id}",
+        json={"rev": "A", "source_file_id": str(pf.id), "action": "resolve"},
+    )
+
+    assert resolved.status_code == 200
+    assert resolved.get_json()["threads"][0]["status"] == "resolved"

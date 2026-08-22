@@ -46,8 +46,10 @@ from app.services.authorization import (
     authorised_get,
     authorise_part_access,
     has_permission,
+    may_moderate_authored,
     part_is_released,
     relationship_job_part_pairs,
+    require_any_permission,
     require_permission,
     scope_queryset,
 )
@@ -109,6 +111,7 @@ from app.services.part_annotations import (
     set_part_comment_priority,
     annotation_payload,
     filtered_part_attrs,
+    find_part_comment,
     migrate_legacy_annotations,
     preload_annotations,
     remove_part_comment,
@@ -1923,7 +1926,7 @@ def part_comments_add(pn):
 
 @bp.post("/parts/<pn>/comments/delete")
 @login_required
-@require_permission("comments.moderate")
+@require_any_permission("comments.write", "comments.moderate")
 @csrf.exempt
 def part_comments_delete(pn):
     pn = (pn or "").strip()
@@ -1937,6 +1940,14 @@ def part_comments_delete(pn):
     p = _find_authorised_part_doc(pn, rev)
     if not p:
         return jsonify({"ok": False, "error": "not found"}), 404
+    target = find_part_comment(p, comment_id=comment_id or None, ts=ts or None, text=text or None)
+    if target is None:
+        return jsonify({"ok": False, "error": "comment not found"}), 404
+    if not may_moderate_authored(current_user, target.get("author"), "comments.moderate"):
+        return jsonify({
+            "ok": False,
+            "error": "You can erase your own comments; erasing someone else's needs comment moderation.",
+        }), 403
     removed = remove_part_comment(p, comment_id=comment_id or None, ts=ts or None, text=text or None)
     if removed is None:
         return jsonify({"ok": False, "error": "comment not found"}), 404
@@ -1981,7 +1992,7 @@ def part_comments_delete(pn):
 
 @bp.post("/parts/<pn>/comments/status")
 @login_required
-@require_permission("comments.moderate")
+@require_any_permission("comments.write", "comments.moderate")
 @csrf.exempt
 def part_comments_status(pn):
     data = request.get_json(silent=True) or {}
@@ -1993,6 +2004,14 @@ def part_comments_status(pn):
     p = _find_authorised_part_doc((pn or "").strip(), rev)
     if not p:
         return jsonify({"ok": False, "error": "not found"}), 404
+    target = find_part_comment(p, comment_id=comment_id)
+    if target is None:
+        return jsonify({"ok": False, "error": "comment not found"}), 404
+    if not may_moderate_authored(current_user, target.get("author"), "comments.moderate"):
+        return jsonify({
+            "ok": False,
+            "error": "You can resolve your own comments; resolving someone else's needs comment moderation.",
+        }), 403
     updated = set_part_comment_status(p, comment_id=comment_id, status=status)
     if updated is None:
         return jsonify({"ok": False, "error": "comment not found"}), 404
@@ -2082,7 +2101,7 @@ def part_comments_reply(pn):
 
 @bp.post("/parts/<pn>/comments/priority")
 @login_required
-@require_permission("comments.moderate")
+@require_any_permission("comments.write", "comments.moderate")
 @csrf.exempt
 def part_comments_priority(pn):
     data = request.get_json(silent=True) or {}
@@ -2094,6 +2113,14 @@ def part_comments_priority(pn):
     p = _find_authorised_part_doc((pn or "").strip(), rev)
     if not p:
         return jsonify({"ok": False, "error": "not found"}), 404
+    target = find_part_comment(p, comment_id=comment_id)
+    if target is None:
+        return jsonify({"ok": False, "error": "comment not found"}), 404
+    if not may_moderate_authored(current_user, target.get("author"), "comments.moderate"):
+        return jsonify({
+            "ok": False,
+            "error": "You can change your own comments; changing someone else's needs comment moderation.",
+        }), 403
     updated = set_part_comment_priority(p, comment_id=comment_id, priority=priority)
     if updated is None:
         return jsonify({"ok": False, "error": "comment not found"}), 404

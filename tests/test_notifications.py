@@ -437,3 +437,60 @@ def test_home_template_has_collapsed_notification_history_control():
     assert 'id="accountNotificationHistory" class="mt-3" hidden' in source
     assert "/api/notifications?view=current&limit=50" in source
     assert "/api/notifications?view=history&limit=50" in source
+
+
+def test_customer_resolving_their_own_comment_clears_their_own_queue(client):
+    """Issue #99 end to end.
+
+    Codex's lifecycle work drops resolved conversations out of the queue, but a
+    customer held no comments.moderate and so could never resolve anything -
+    the queue had no way to empty. This is the whole round trip for the role
+    that was stuck, in one test.
+    """
+    from app.services.standard_roles import STANDARD_ROLES
+
+    role = Role(
+        name="issue99-customer-queue",
+        permissions=[*STANDARD_ROLES["customer"].permissions, "parts.read_unreleased"],
+    ).save()
+    customer = _user("clive@example.com", role)
+    Part(part_number="LIFE-300", revision="A", description="Customer review").save()
+    PartAnnotation(
+        part_number="LIFE-300",
+        revision="A",
+        comments=[
+            {
+                "id": "comment-300",
+                "author": customer.email,
+                "text": "Please confirm the hole spacing",
+                "status": "open",
+            }
+        ],
+    ).save()
+    UserNotification(
+        recipient=customer,
+        kind="part_review",
+        title="New comment",
+        url="/ui/part/LIFE-300?rev=A&tab=reviews",
+        part_number="LIFE-300",
+        revision="A",
+        comment_id="comment-300",
+        lifecycle="current",
+        lifecycle_reason="open",
+    ).save()
+
+    _login(client, customer)
+    assert len(client.get("/api/notifications").get_json()["notifications"]) == 1
+
+    resolved = client.post(
+        "/api/parts/LIFE-300/comments/status",
+        json={"rev": "A", "id": "comment-300", "status": "resolved"},
+    )
+    assert resolved.status_code == 200
+
+    current = client.get("/api/notifications").get_json()
+    assert current["notifications"] == []
+    assert current["current_count"] == 0
+
+    history = client.get("/api/notifications?view=history").get_json()
+    assert {row["lifecycle_reason"] for row in history["notifications"]} == {"resolved"}

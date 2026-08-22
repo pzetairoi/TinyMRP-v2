@@ -412,3 +412,142 @@ def test_comment_reply_and_priority_edit_endpoints(client, user):
     assert len(notes) == 1
     assert notes[0].recipient.email == user.email
     assert "Importance changed" in notes[0].title
+
+
+# --- issue #99: authors can tidy up after themselves ------------------------
+#
+# comments.moderate lives only in Engineering Manager and admin, so every other
+# role could raise a comment but never resolve or delete it - not even its own.
+# The UI shows those controls to anyone with comments.write, so they were
+# visible and dead, and the author's notification queue could never empty.
+
+_AUTHOR = "author@example.com"
+_OTHER = "someone-else@example.com"
+
+
+def _role_for(name: str, permissions):
+    return Role(name=name, permissions=list(permissions)).save()
+
+
+def _part_with_comment(pn: str, author: str = _AUTHOR):
+    part = Part(part_number=pn, revision="A").save()
+    PartAnnotation(
+        part_number=pn,
+        revision="A",
+        comments=[{"id": "c-1", "author": author, "text": "please check", "status": "open"}],
+    ).save()
+    return part
+
+
+def _collaborator_permissions():
+    """Exactly what the shipped Customer role grants."""
+    from app.services.standard_roles import STANDARD_ROLES
+
+    return STANDARD_ROLES["customer"].permissions
+
+
+def test_customer_role_really_lacks_comment_moderation():
+    """Guards the premise: if this ever changes, the tests below prove nothing."""
+    permissions = _collaborator_permissions()
+    assert "comments.write" in permissions
+    assert "comments.moderate" not in permissions
+
+
+def test_collaborator_can_resolve_and_delete_their_own_comment(client):
+    """Issue #99: this is exactly what Clive could not do."""
+    role = _role_for("issue99-customer", (*_collaborator_permissions(), "parts.read_unreleased"))
+    author = _make_user(_AUTHOR)
+    author.roles = [role]
+    author.save()
+    _part_with_comment("PN-OWN")
+    _login(client, author)
+
+    resolved = client.post(
+        "/api/parts/PN-OWN/comments/status",
+        json={"rev": "A", "id": "c-1", "status": "resolved"},
+    )
+    assert resolved.status_code == 200
+    assert resolved.get_json()["comment"]["status"] == "resolved"
+
+    erased = client.post(
+        "/api/parts/PN-OWN/comments/delete",
+        json={"rev": "A", "id": "c-1"},
+    )
+    assert erased.status_code == 200
+    assert erased.get_json()["comments"] == []
+
+
+def test_collaborator_cannot_touch_someone_elses_comment(client):
+    """Moderating other people's contributions is still the privileged act."""
+    role = _role_for("issue99-customer-other", (*_collaborator_permissions(), "parts.read_unreleased"))
+    intruder = _make_user(_OTHER)
+    intruder.roles = [role]
+    intruder.save()
+    _part_with_comment("PN-THEIRS", author=_AUTHOR)
+    _login(client, intruder)
+
+    for path, body in (
+        ("/api/parts/PN-THEIRS/comments/status", {"rev": "A", "id": "c-1", "status": "resolved"}),
+        ("/api/parts/PN-THEIRS/comments/priority", {"rev": "A", "id": "c-1", "priority": "high"}),
+        ("/api/parts/PN-THEIRS/comments/delete", {"rev": "A", "id": "c-1"}),
+    ):
+        response = client.post(path, json=body)
+        assert response.status_code == 403, path
+        assert "moderation" in response.get_json()["error"]
+
+    remaining = PartAnnotation.objects(part_number="PN-THEIRS").first()
+    assert [row["status"] for row in remaining.comments] == ["open"]
+
+
+def test_moderator_without_write_can_still_moderate(client):
+    """comments.moderate does not imply comments.write, and must stand alone."""
+    role = _role_for(
+        "issue99-moderator",
+        ("parts.read", "parts.read_unreleased", "comments.read", "comments.moderate"),
+    )
+    moderator = _make_user("moderator@example.com")
+    moderator.roles = [role]
+    moderator.save()
+    _part_with_comment("PN-MOD", author=_AUTHOR)
+    _login(client, moderator)
+
+    response = client.post(
+        "/api/parts/PN-MOD/comments/status",
+        json={"rev": "A", "id": "c-1", "status": "resolved"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_reader_cannot_resolve_even_their_own_comment(client):
+    """The floor is unchanged: comments.read alone mutates nothing."""
+    role = _role_for("issue99-reader", ("parts.read", "parts.read_unreleased", "comments.read"))
+    reader = _make_user(_AUTHOR)
+    reader.roles = [role]
+    reader.save()
+    _part_with_comment("PN-READER", author=_AUTHOR)
+    _login(client, reader)
+
+    response = client.post(
+        "/api/parts/PN-READER/comments/status",
+        json={"rev": "A", "id": "c-1", "status": "resolved"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_author_match_ignores_email_case(client):
+    """Stored authorship and the login can differ in case; identity does not."""
+    role = _role_for("issue99-case", (*_collaborator_permissions(), "parts.read_unreleased"))
+    author = _make_user(_AUTHOR)
+    author.roles = [role]
+    author.save()
+    _part_with_comment("PN-CASE", author=_AUTHOR.upper())
+    _login(client, author)
+
+    response = client.post(
+        "/api/parts/PN-CASE/comments/status",
+        json={"rev": "A", "id": "c-1", "status": "resolved"},
+    )
+
+    assert response.status_code == 200

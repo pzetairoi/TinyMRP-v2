@@ -464,6 +464,45 @@ def _find_comment_row(comments: list[dict[str, Any]], comment_id: str) -> Option
     return None
 
 
+def _comment_row_matches(
+    row: dict[str, Any],
+    comment_id: Optional[str],
+    ts: Optional[str],
+    text: Optional[str],
+) -> bool:
+    """Identify one comment by id (preferred) or, for older clients, (ts, text)."""
+    id_key = str(comment_id or "").strip()
+    if id_key:
+        return str(row.get("id") or "") == id_key
+    ts_key = str(ts or "").strip()
+    text_key = str(text or "").strip()
+    return bool(ts_key) and str(row.get("ts") or "") == ts_key and (
+        not text_key or str(row.get("text") or "") == text_key
+    )
+
+
+def find_part_comment(
+    part: Part,
+    *,
+    comment_id: Optional[str] = None,
+    ts: Optional[str] = None,
+    text: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """One comment, matched exactly as remove_part_comment would match it.
+
+    Callers need the author before mutating, to decide whether this user is
+    allowed to. Sharing the matching rule keeps the comment that gets checked
+    and the comment that gets changed the same one.
+    """
+    doc = _get_doc(part)
+    if not doc:
+        return None
+    for row in normalize_comment_rows(getattr(doc, "comments", []) or []):
+        if _comment_row_matches(row, comment_id, ts, text):
+            return row
+    return None
+
+
 def set_part_comment_status(part: Part, *, comment_id: str, status: str) -> Optional[dict[str, Any]]:
     migrate_legacy_annotations(part)
     doc = _get_doc(part)
@@ -551,21 +590,12 @@ def remove_part_comment(
     notes_text = str(getattr(doc, "notes", "") or "")
     comments = normalize_comment_rows(getattr(doc, "comments", []) or [])
 
-    id_key = str(comment_id or "").strip()
-    ts_key = str(ts or "").strip()
-    text_key = str(text or "").strip()
     removed: Optional[dict[str, Any]] = None
     remaining: list[dict[str, str]] = []
     for row in comments:
-        if removed is None:
-            if id_key and str(row.get("id") or "") == id_key:
-                removed = row
-                continue
-            if not id_key and ts_key and str(row.get("ts") or "") == ts_key and (
-                not text_key or str(row.get("text") or "") == text_key
-            ):
-                removed = row
-                continue
+        if removed is None and _comment_row_matches(row, comment_id, ts, text):
+            removed = row
+            continue
         remaining.append(row)
     if removed is None:
         return None

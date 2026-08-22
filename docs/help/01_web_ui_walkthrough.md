@@ -52,6 +52,21 @@ comment or review remains in the current list until somebody resolves or
 deletes it. History keeps the notification text for context, but a deleted
 comment is not restored to the part by opening its historical notification.
 
+### Who can resolve or delete a conversation
+
+**You can always resolve, reopen, delete or reprioritise a comment or review
+thread you raised yourself** — whatever your role. Customers, suppliers and
+workshop users can clear their own items, so their queue empties like anybody
+else's.
+
+Acting on *someone else's* comment or thread is moderation, and needs
+**Comment moderation** (`comments.moderate`) or **Markup moderation**
+(`markups.moderate`). Those sit in the Engineering Manager role by default.
+Without them the attempt is refused and the conversation is left untouched.
+
+Reading alone is never enough: a role with only **Comments read** cannot
+resolve or delete anything, including its own.
+
 **Troubleshooting:** if a status changed in another browser tab, refresh Home.
 Items for parts or comments you can no longer access are not shown in either
 the current list or history.

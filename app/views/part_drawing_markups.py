@@ -9,6 +9,8 @@ from app.models.part import Part
 from app.services.authorization import (
     authorise_part_access,
     has_permission,
+    may_moderate_authored,
+    require_any_permission,
     require_permission,
     uses_portal_presentation,
 )
@@ -397,7 +399,7 @@ def drawing_markup_thread_reply(pn: str, thread_id: str):
 
 @bp.patch("/parts/<path:pn>/drawing-markups/threads/<thread_id>")
 @login_required
-@require_permission("markups.moderate")
+@require_any_permission("markups.write", "markups.moderate")
 def drawing_markup_thread_patch(pn: str, thread_id: str):
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
@@ -408,6 +410,12 @@ def drawing_markup_thread_patch(pn: str, thread_id: str):
     thread = find_thread(doc, thread_id)
     if not thread:
         return _error(404, "thread_not_found", "review thread not found")
+    if not may_moderate_authored(current_user, thread.created_by, "markups.moderate"):
+        return _error(
+            403,
+            "forbidden",
+            "You can act on review threads you raised; other people's need markup moderation.",
+        )
 
     action = str(data.get("action") or "").strip().lower()
     priority = data.get("priority")
@@ -459,7 +467,7 @@ def drawing_markup_thread_patch(pn: str, thread_id: str):
 
 @bp.delete("/parts/<path:pn>/drawing-markups/threads/<thread_id>")
 @login_required
-@require_permission("markups.moderate")
+@require_any_permission("markups.write", "markups.moderate")
 def drawing_markup_thread_delete(pn: str, thread_id: str):
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
@@ -470,6 +478,12 @@ def drawing_markup_thread_delete(pn: str, thread_id: str):
     thread = find_thread(doc, thread_id)
     if not thread:
         return _error(404, "thread_not_found", "review thread not found")
+    if not may_moderate_authored(current_user, thread.created_by, "markups.moderate"):
+        return _error(
+            403,
+            "forbidden",
+            "You can act on review threads you raised; other people's need markup moderation.",
+        )
     participants = _thread_participants(thread)
     title = str(thread.title or "Markup review")
     delete_thread(doc, thread, user_email=_user_email())

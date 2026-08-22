@@ -236,6 +236,27 @@ def has_any_permission(user: Any, permissions: Iterable[str]) -> bool:
     return any(has_permission(user, permission) for permission in permissions)
 
 
+def may_moderate_authored(user: Any, author_email: Any, permission: str) -> bool:
+    """Whether this user may resolve or delete content written by author_email.
+
+    Moderating OTHER people's contributions is the privileged act, and that
+    still needs the moderate permission. Tidying up after yourself is not: a
+    customer or supplier can raise a comment or a review thread but held no
+    moderate permission, so they could never resolve or delete their own -
+    their notification queue had no way to empty (issue #99).
+
+    Authorship is the email recorded on the content. Impersonation swaps the
+    logged-in user, so an administrator working inside a customer's session is
+    correctly measured as that customer.
+    """
+    if has_permission(user, permission):
+        return True
+    author = str(author_email or "").strip().casefold()
+    if not author:
+        return False
+    return author == str(getattr(user, "email", "") or "").strip().casefold()
+
+
 def _resource_identity(
     resource: Any,
     context: Mapping[str, Any] | None,
@@ -1159,6 +1180,28 @@ def enforce_permission(permission: str, *, user: Any = None) -> None:
     if not decision.allowed:
         g.authz_denial = decision
         abort(403)
+
+
+def require_any_permission(*permissions: str):
+    """Require at least one of several canonical permissions for a route.
+
+    The counterpart to :func:`has_any_permission`, for routes reachable by two
+    different capabilities - resolving your own comment needs comments.write,
+    resolving anyone's needs comments.moderate, and neither implies the other.
+    The denial recorded is the first permission, which is the one an ordinary
+    caller is expected to be missing.
+    """
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if not has_any_permission(current_user, permissions):
+                enforce_permission(permissions[0])
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 def require_permission(permission: str):
