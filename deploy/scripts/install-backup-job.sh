@@ -9,7 +9,8 @@
 #
 # Usage:
 #   sudo ./deploy/scripts/install-backup-job.sh [--time 02:30] [--keep-days 14]
-#        [--keep-count 8] [--max-total-gb 10]
+#        [--keep-full 2] [--keep-db 30] [--keep-count 0] [--max-total-gb 10]
+#        [--min-free-gb 5] [--min-free-pct 10]
 #        [--dest <dir>] [--no-deliverables] [--uninstall]
 set -euo pipefail
 
@@ -19,8 +20,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 ON_CALENDAR_TIME="02:30"
 KEEP_DAYS=14
-KEEP_COUNT=8
+KEEP_COUNT=0
+KEEP_FULL=2
+KEEP_DB=30
 MAX_TOTAL_GB=10
+MIN_FREE_GB=5
+MIN_FREE_PCT=10
 DEST_ROOT=""
 EXTRA_FLAGS=""
 UNINSTALL=0
@@ -30,7 +35,11 @@ while [ $# -gt 0 ]; do
     --time) ON_CALENDAR_TIME="${2:?}"; shift 2 ;;
     --keep-days) KEEP_DAYS="${2:?}"; shift 2 ;;
     --keep-count) KEEP_COUNT="${2:?}"; shift 2 ;;
+    --keep-full) KEEP_FULL="${2:?}"; shift 2 ;;
+    --keep-db) KEEP_DB="${2:?}"; shift 2 ;;
     --max-total-gb) MAX_TOTAL_GB="${2:?}"; shift 2 ;;
+    --min-free-gb) MIN_FREE_GB="${2:?}"; shift 2 ;;
+    --min-free-pct) MIN_FREE_PCT="${2:?}"; shift 2 ;;
     --dest) DEST_ROOT="${2:?}"; shift 2 ;;
     --no-deliverables) EXTRA_FLAGS="${EXTRA_FLAGS} --no-deliverables"; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
@@ -67,7 +76,10 @@ fi
 #
 # The full job keeps the original unit name so an existing installation picks
 # up the new schedule instead of ending up with two overlapping full backups.
-RETENTION_ARGS="--keep-days ${KEEP_DAYS} --keep-count ${KEEP_COUNT} --max-total-gb ${MAX_TOTAL_GB}"
+# Both jobs get the same floor - it protects the disk, not a job - but their
+# own counts, because a 2 GB weekly full backup and a 2 MB daily database one
+# must not expire each other.
+RETENTION_ARGS="--keep-days ${KEEP_DAYS} --keep-count ${KEEP_COUNT} --keep-full ${KEEP_FULL} --keep-db ${KEEP_DB} --max-total-gb ${MAX_TOTAL_GB} --min-free-gb ${MIN_FREE_GB} --min-free-pct ${MIN_FREE_PCT}"
 
 BACKUP_CMD="$(repo_root)/deploy/scripts/backup-all.sh ${RETENTION_ARGS} --continue-on-error${EXTRA_FLAGS}"
 DB_BACKUP_CMD="$(repo_root)/deploy/scripts/backup-all.sh ${RETENTION_ARGS} --continue-on-error --no-deliverables"

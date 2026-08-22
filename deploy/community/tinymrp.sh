@@ -334,6 +334,74 @@ prune_backups() {
   done
 }
 
+
+# The retention above bounds the BACKUP FOLDER. Only this bounds the DISK, which
+# is the thing that actually runs out and takes the instance down with it. It is
+# per-host, so it accounts for everything else on the machine too.
+backup_fs_free_kb()  { df -Pk "$BACKUP_ROOT" 2>/dev/null | awk 'NR==2 {print $4}'; }
+backup_fs_total_kb() { df -Pk "$BACKUP_ROOT" 2>/dev/null | awk 'NR==2 {print $2}'; }
+
+backup_min_free_kb() {
+  local min_gb min_pct total abs pct
+  min_gb="$(env_get BACKUP_MIN_FREE_GB)";  min_gb="${min_gb:-5}"
+  min_pct="$(env_get BACKUP_MIN_FREE_PCT)"; min_pct="${min_pct:-10}"
+  [[ "$min_gb" =~ ^[0-9]+$ && "$min_pct" =~ ^[0-9]+$ ]] ||     die "BACKUP_MIN_FREE_GB and BACKUP_MIN_FREE_PCT in .env must be whole numbers."
+  total="$(backup_fs_total_kb)"; total="${total:-0}"
+  abs=$(( min_gb * 1024 * 1024 ))
+  pct=$(( total * min_pct / 100 ))
+  (( pct > abs )) && { printf '%s
+' "$pct"; return 0; }
+  printf '%s
+' "$abs"
+}
+
+# Oldest first, and never the newest of either kind: the newest full backup is
+# the only copy of the deliverables, the newest database-only one is the
+# freshest data. Returns 0 once the floor is met, 1 if it could not be reached.
+backup_free_space_until() {
+  local needed_kb="${1:-0}" floor target dir newest_any newest_full pruned=0
+  floor="$(backup_min_free_kb)"
+  target=$(( floor + needed_kb ))
+  (( "$(backup_fs_free_kb)" >= target )) && return 0
+  newest_any="$(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -name '20*Z' -printf '%f
+' 2>/dev/null | sort -r | head -n 1)"
+  newest_full=""
+  while IFS= read -r dir; do
+    [[ -n "$dir" ]] || continue
+    if [[ -f "$BACKUP_ROOT/$dir/deliverables.tar.gz" ]]; then newest_full="$dir"; break; fi
+  done < <(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -name '20*Z' -printf '%f
+' 2>/dev/null | sort -r)
+  while IFS= read -r dir; do
+    [[ -n "$dir" ]] || continue
+    [[ "$dir" == "$newest_any" || "$dir" == "$newest_full" ]] && continue
+    rm -rf -- "${BACKUP_ROOT:?}/${dir:?}" && pruned=$((pruned + 1))
+    (( "$(backup_fs_free_kb)" >= target )) && break
+  done < <(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -name '20*Z' -printf '%f
+' 2>/dev/null | sort)
+  (( pruned > 0 )) && printf 'Pruned %s backup(s) to stay above the free-space floor.
+' "$pruned"
+  (( "$(backup_fs_free_kb)" >= target ))
+}
+
+# What the pending backup is likely to need: the newest one of the same kind
+# plus a fifth for growth. With nothing to compare against, only the bare floor
+# is enforced.
+backup_estimated_kb() {
+  local want_full="$1" dir kb
+  while IFS= read -r dir; do
+    [[ -n "$dir" ]] || continue
+    if [[ "$want_full" == "1" && -f "$BACKUP_ROOT/$dir/deliverables.tar.gz" ]] ||        [[ "$want_full" != "1" && ! -f "$BACKUP_ROOT/$dir/deliverables.tar.gz" ]]; then
+      kb="$(du -sk "$BACKUP_ROOT/$dir" 2>/dev/null | cut -f1)"
+      printf '%s
+' $(( ${kb:-0} * 12 / 10 ))
+      return 0
+    fi
+  done < <(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -name '20*Z' -printf '%f
+' 2>/dev/null | sort -r)
+  printf '0
+'
+}
+
 backup() {
   local include_files="${1:-}" stamp partial target archive_bytes
   require_install
@@ -342,6 +410,14 @@ backup() {
   need_command sha256sum
   mkdir -p "$BACKUP_ROOT"
   chmod 700 "$BACKUP_ROOT"
+  # Make room BEFORE writing. Pruning only afterwards cannot prevent the failure
+  # it exists to prevent: the disk fills while the archive is being written, and
+  # a half-written backup can take the good ones down with it.
+  local needed_kb
+  needed_kb="$(backup_estimated_kb "$([[ "$include_files" == "--include-deliverables" ]] && echo 1 || echo 0)")"
+  if ! backup_free_space_until "$needed_kb"; then
+    die "Not enough disk for a backup: needs about $(( needed_kb / 1048576 )) GB plus a $(( $(backup_min_free_kb) / 1048576 )) GB free-space floor, and only $(( $(backup_fs_free_kb) / 1048576 )) GB is free after pruning. Existing backups were KEPT and nothing was written. Free disk space, or lower BACKUP_MIN_FREE_GB / BACKUP_MIN_FREE_PCT in .env."
+  fi
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
   partial="$BACKUP_ROOT/.${stamp}.partial"
   target="$BACKUP_ROOT/$stamp"
@@ -371,6 +447,10 @@ backup() {
   (cd "$partial" && sha256sum mongo.archive.gz config.env metadata.txt ${include_files:+deliverables.tar.gz} >checksums.sha256)
   mv "$partial" "$target"
   prune_backups
+  if ! backup_free_space_until 0; then
+    printf 'WARNING: still below the free-space floor with only the newest backups left; free disk space on this host.
+' >&2
+  fi
   printf 'Verified backup: %s (%s uncompressed Mongo bytes)\n' "$target" "$archive_bytes"
 }
 

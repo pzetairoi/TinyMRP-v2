@@ -224,11 +224,65 @@ sudo ./deploy/scripts/rollback-instance.sh company1
 
 Backups land in `/srv/tinymrp/backups/<instance>/<UTC-stamp>/` with
 `mongo.archive.gz`, `deliverables.tar.gz`, `config/` and `manifest.env`.
-Retention: `--keep-days 14`, `--keep-count 8`, `--max-total-gb 10`.
 
 `--no-deliverables` is the cheap one — the database is a couple of MB
-compressed while the file tree can be many GB — so a sensible schedule is
+compressed while the file tree can be many GB — so the installed schedule is
 nightly database-only and weekly full.
+
+### Retention
+
+Four limits, any of which can prune. **The newest backup of each kind is never
+pruned**, whatever the limits say:
+
+| Option | Default | Bounds |
+| --- | --- | --- |
+| `--keep-days` | 14 | Age |
+| `--keep-full` | 2 | How many **full** backups exist |
+| `--keep-db` | 30 | How many **database-only** backups exist |
+| `--max-total-gb` | 10 | The backup folder for one instance |
+
+Full and database-only backups are counted **separately** because they differ by
+three orders of magnitude — roughly 2 GB against 2 MB. They used to share one
+ceiling, which meant a single full backup could evict a month of cheap daily
+restore points, or a run of daily ones could evict the only copy of the
+deliverables. A backup counts as *full* if it contains `deliverables.tar.gz`;
+nothing about the folder layout changed, so restore and rollback are unaffected.
+
+### The free-space floor
+
+The limits above bound the *backup folder*. Only this one bounds the **disk**,
+which is what actually runs out — and being per-host it accounts for everything
+else on the machine, not just backups.
+
+| Option | Default |
+| --- | --- |
+| `--min-free-gb` | 5 |
+| `--min-free-pct` | 10 |
+
+Whichever is larger wins, so the floor scales with the host instead of being
+wrong after a resize. On a 38 GB disk that reserves 5 GB; on a 72 GB disk, 7.2 GB.
+
+It is enforced **before** the backup as well as after. Pruning only afterwards
+cannot prevent the failure it exists to prevent: the disk fills while the
+archive is being written.
+
+When the floor is breached, backups are removed **oldest first**, and pruning
+stops the moment there is room again — so a single remaining backup is the worst
+case, not the routine.
+
+If there is still not enough room once only the newest backup of each kind
+remains, the backup **refuses to run**, exits non-zero so the timer records a
+failure, and **leaves the existing backups untouched**. A missed backup is
+recoverable; a full disk takes the instance down and destroys the old backups
+with it.
+
+Set retention with the same flags on `install-backup-job.sh`, which applies them
+to both timers:
+
+```bash
+sudo ./deploy/scripts/install-backup-job.sh --keep-full 2 --keep-db 30      --min-free-gb 5 --min-free-pct 10
+```
+
 
 `update-instance.sh` verifies health **through the live Caddy route**, not just
 the container, and rolls the image back automatically on failure.

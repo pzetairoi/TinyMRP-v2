@@ -9,17 +9,33 @@
 #   mongo-raw.tar.gz      OPTIONAL (--raw): raw /data/db tarball, compatible with
 #                         rollback-instance.sh --restore-mongo-from (stops the instance briefly!)
 #
-# Retention, three limits, any of which can prune. The newest backup is never
+# Retention. Any limit can prune; the newest backup OF EACH KIND is never
 # pruned, whatever they say:
 #   --keep-days N      default 14, age
-#   --keep-count N     default 8, a hard ceiling on how many exist
-#   --max-total-gb N   default 10, the only limit expressed in the unit that
-#                      actually runs out. Age alone aimed 14 days of 2 GB
-#                      backups at a 14 GB disk here.
+#   --keep-full N      default 2,  how many full backups exist
+#   --keep-db N        default 30, how many database-only backups exist
+#   --keep-count N     default 0 (off), a ceiling across both kinds
+#   --max-total-gb N   default 10, a ceiling on the backup folder itself
+#   --min-free-gb N    default 5   \ the floor that actually matters: keep at
+#   --min-free-pct N   default 10  / least this much of the DISK free
+#
+# Full and database-only backups are counted separately because they differ by
+# three orders of magnitude - ~2 GB against ~2 MB - and they used to share one
+# budget. A single full backup could evict a month of cheap daily restore
+# points, or a run of daily ones could evict the only copy of the deliverables.
+# A backup is "full" if it contains deliverables.tar.gz; nothing about the
+# on-disk layout changed, so restore and rollback still read it as before.
+#
+# The free-space floor is checked BEFORE the backup as well as after. Pruning
+# only afterwards cannot help: the disk fills while the archive is being
+# written. If there is not room even after pruning to the newest backup, this
+# REFUSES to run and exits non-zero. A missed backup is recoverable; a full
+# disk takes the instance down and destroys the old backups with it.
 #
 # Usage:
 #   sudo ./deploy/scripts/backup-instance.sh <instance_name> [--dest <dir>]
-#        [--keep-days 14] [--keep-count 8] [--max-total-gb 10]
+#        [--keep-days 14] [--keep-full 2] [--keep-db 30] [--keep-count 0]
+#        [--max-total-gb 10] [--min-free-gb 5] [--min-free-pct 10]
 #        [--no-deliverables] [--raw] [--dry-run]
 #
 # --no-deliverables is the cheap one: the database is ~2 MB compressed while
@@ -32,7 +48,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/lib/common.sh"
 
 usage() {
-  sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 INSTANCE_NAME="${1:-}"
@@ -44,8 +60,14 @@ KEEP_DAYS=14
 # A hard ceiling on how many backups exist, and on how much room they may
 # occupy. Age alone let 14 days of 2 GB backups aim at a 14 GB disk.
 # 0 disables either limit.
-KEEP_COUNT=8
+KEEP_COUNT=0
+KEEP_FULL=2
+KEEP_DB=30
 MAX_TOTAL_GB=10
+# The floor expressed in the unit that actually runs out. Whichever is larger
+# wins, so it scales with the host instead of being wrong after a resize.
+MIN_FREE_GB=5
+MIN_FREE_PCT=10
 WITH_DELIVERABLES=1
 WITH_RAW=0
 DRY_RUN=0
@@ -55,7 +77,11 @@ while [ $# -gt 0 ]; do
     --dest) DEST_ROOT="${2:?}"; shift 2 ;;
     --keep-days) KEEP_DAYS="${2:?}"; shift 2 ;;
     --keep-count) KEEP_COUNT="${2:?}"; shift 2 ;;
+    --keep-full) KEEP_FULL="${2:?}"; shift 2 ;;
+    --keep-db) KEEP_DB="${2:?}"; shift 2 ;;
     --max-total-gb) MAX_TOTAL_GB="${2:?}"; shift 2 ;;
+    --min-free-gb) MIN_FREE_GB="${2:?}"; shift 2 ;;
+    --min-free-pct) MIN_FREE_PCT="${2:?}"; shift 2 ;;
     --no-deliverables) WITH_DELIVERABLES=0; shift ;;
     --raw) WITH_RAW=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -79,6 +105,99 @@ BACKUP_DIR="${DEST_ROOT}/${INSTANCE_NAME}/${STAMP}"
 COMPOSE_FILE="$(instance_compose_file "$INSTANCE_NAME")"
 ROUTE_FILE="$(caddy_routes_dir)/tinymrp-${INSTANCE_NAME}.caddy"
 
+
+# --- disk floor -------------------------------------------------------------
+# Everything above bounds the BACKUP FOLDER. Only this bounds the DISK, which is
+# the thing that actually runs out and takes the instance down with it.
+
+backup_kind() {
+  # A backup carrying deliverables is "full"; otherwise it is database-only.
+  # Read from the archive itself, so no directory naming changed and restore,
+  # rollback and the backups dashboard keep reading the layout they always did.
+  if [ -f "$1/deliverables.tar.gz" ]; then printf 'full\n'; else printf 'db\n'; fi
+}
+
+list_backups_newest_first() {
+  find "${DEST_ROOT}/${INSTANCE_NAME}" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null \
+    | sort -rn | cut -d' ' -f2-
+}
+
+list_backups_of_kind_newest_first() {
+  local want="$1" dir
+  while IFS= read -r dir; do
+    [ -n "$dir" ] || continue
+    [ "$(backup_kind "$dir")" = "$want" ] && printf '%s\n' "$dir"
+  done < <(list_backups_newest_first)
+}
+
+fs_free_kb()  { df -Pk "$DEST_ROOT" 2>/dev/null | awk 'NR==2 {print $4}'; }
+fs_total_kb() { df -Pk "$DEST_ROOT" 2>/dev/null | awk 'NR==2 {print $2}'; }
+
+min_free_kb() {
+  local total_kb pct_kb abs_kb
+  total_kb="$(fs_total_kb)"; total_kb="${total_kb:-0}"
+  abs_kb=$(( ${MIN_FREE_GB:-0} * 1024 * 1024 ))
+  pct_kb=$(( total_kb * ${MIN_FREE_PCT:-0} / 100 ))
+  if [ "$pct_kb" -gt "$abs_kb" ]; then printf '%s\n' "$pct_kb"; else printf '%s\n' "$abs_kb"; fi
+}
+
+# The newest of each kind is protected. They are complementary: the newest full
+# is the only copy of the deliverables, the newest database-only one is the
+# freshest data. Pruning for space must never leave zero of either.
+protected_backups() {
+  # No `| head -n 1` near this: under `set -o pipefail` head exits first, the
+  # producer takes SIGPIPE, and the script dies with 141 having protected only
+  # half of what it meant to.
+  local -a full_list db_list
+  mapfile -t full_list < <(list_backups_of_kind_newest_first full)
+  mapfile -t db_list   < <(list_backups_of_kind_newest_first db)
+  [ "${#full_list[@]}" -gt 0 ] && echo "${full_list[0]}"
+  [ "${#db_list[@]}" -gt 0 ] && echo "${db_list[0]}"
+  return 0
+}
+
+# Oldest first, so the least valuable copy goes first.
+prunable_backups_oldest_first() {
+  local protected dir
+  protected="$(protected_backups)"
+  while IFS= read -r dir; do
+    [ -n "$dir" ] || continue
+    printf '%s\n' "$protected" | grep -qxF "$dir" || printf '%s\n' "$dir"
+  done < <(list_backups_newest_first | tac)
+}
+
+# Free space until the floor is met, or until only protected backups remain.
+# Returns 0 if the floor is met, 1 if it could not be reached.
+free_space_until() {
+  local needed_kb="${1:-0}" floor_kb target_kb dir freed=0
+  floor_kb="$(min_free_kb)"
+  target_kb=$(( floor_kb + needed_kb ))
+  [ "$(fs_free_kb)" -ge "$target_kb" ] 2>/dev/null && return 0
+  while IFS= read -r dir; do
+    [ -n "$dir" ] || continue
+    rm -rf -- "$dir" && freed=$((freed + 1))
+    [ "$(fs_free_kb)" -ge "$target_kb" ] 2>/dev/null && break
+  done < <(prunable_backups_oldest_first)
+  [ "$freed" -gt 0 ] && info "  pruned ${freed} backup(s): disk below the free-space floor"
+  [ "$(fs_free_kb)" -ge "$target_kb" ] 2>/dev/null
+}
+
+# What the pending backup is likely to need: the newest one of the same kind,
+# plus a fifth for growth. With nothing to compare against we cannot estimate,
+# so only the bare floor is enforced.
+estimated_backup_kb() {
+  local kind="db" kb
+  local -a of_kind
+  [ "${WITH_DELIVERABLES:-0}" -eq 1 ] && kind="full"
+  mapfile -t of_kind < <(list_backups_of_kind_newest_first "$kind")
+  if [ "${#of_kind[@]}" -eq 0 ]; then
+    echo 0
+    return 0
+  fi
+  kb="$(du -sk "${of_kind[0]}" 2>/dev/null | cut -f1)"
+  echo $(( ${kb:-0} * 12 / 10 ))
+}
+
 if [ "$DRY_RUN" -eq 1 ]; then
   info "[dry-run] Would back up instance '${INSTANCE_NAME}' to ${BACKUP_DIR}"
   info "[dry-run]   mongodump: docker exec ${MONGO_CONTAINER_NAME} mongodump -d ${MONGO_DB} --archive --gzip"
@@ -90,6 +209,15 @@ fi
 
 if ! docker inspect -f '{{.State.Running}}' "$MONGO_CONTAINER_NAME" 2>/dev/null | grep -q true; then
   die "Mongo container '${MONGO_CONTAINER_NAME}' is not running."
+fi
+
+# Make room BEFORE writing anything. Pruning only afterwards cannot prevent the
+# failure it is meant to prevent - the disk fills while the archive is being
+# written, and a half-written backup can take the old ones down with it.
+ensure_dir "${DEST_ROOT}/${INSTANCE_NAME}"
+NEEDED_KB="$(estimated_backup_kb)"
+if ! free_space_until "$NEEDED_KB"; then
+  die "Not enough disk for a backup of '${INSTANCE_NAME}': needs ~$(( NEEDED_KB / 1048576 )) GB plus a $(( $(min_free_kb) / 1048576 )) GB floor, $(( $(fs_free_kb) / 1048576 )) GB free after pruning. Existing backups were KEPT and nothing was written. Free disk space, or lower --min-free-gb/--min-free-pct."
 fi
 
 ensure_dir "$BACKUP_DIR/config"
@@ -206,17 +334,28 @@ prune_backup_dirs() {
   return 0
 }
 
-list_backups_newest_first() {
-  find "${DEST_ROOT}/${INSTANCE_NAME}" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null \
-    | sort -rn | cut -d' ' -f2-
-}
-
 if [ "${KEEP_DAYS:-0}" -gt 0 ] 2>/dev/null; then
   # -mtime +N never matches the backup just written, so the newest is safe.
   mapfile -t OLD_BY_AGE < <(find "${DEST_ROOT}/${INSTANCE_NAME}" -mindepth 1 -maxdepth 1 -type d -mtime +"$KEEP_DAYS" 2>/dev/null)
   [ "${#OLD_BY_AGE[@]}" -gt 0 ] && prune_backup_dirs "older than ${KEEP_DAYS} days" "${OLD_BY_AGE[@]}"
 fi
 
+# Counted per kind. Sharing one ceiling let a single 2 GB full backup evict a
+# month of 2 MB daily restore points, and let a run of daily ones evict the only
+# copy of the deliverables. They are different things and expire differently.
+prune_by_kind_count() {
+  local kind="$1" keep="$2"
+  [ "${keep:-0}" -gt 0 ] 2>/dev/null || return 0
+  mapfile -t OF_KIND < <(list_backups_of_kind_newest_first "$kind")
+  if [ "${#OF_KIND[@]}" -gt "$keep" ]; then
+    prune_backup_dirs "keeping the newest ${keep} ${kind} backup(s)" "${OF_KIND[@]:$keep}"
+  fi
+}
+prune_by_kind_count full "$KEEP_FULL"
+prune_by_kind_count db "$KEEP_DB"
+
+# Kept for callers that still pass it. 0 (the default) leaves it off, because
+# the per-kind ceilings above are the ones that make sense.
 if [ "${KEEP_COUNT:-0}" -gt 0 ] 2>/dev/null; then
   mapfile -t ALL_BACKUPS < <(list_backups_newest_first)
   if [ "${#ALL_BACKUPS[@]}" -gt "$KEEP_COUNT" ]; then
@@ -242,6 +381,12 @@ if [ "${MAX_TOTAL_GB:-0}" -gt 0 ] 2>/dev/null; then
   if [ "${#OVER_BUDGET[@]}" -gt 0 ]; then
     prune_backup_dirs "over the ${MAX_TOTAL_GB} GB budget" "${OVER_BUDGET[@]}"
   fi
+fi
+
+# The floor again, now the new backup is on disk and safe. Anything the other
+# limits left behind goes if the disk is still tighter than the floor.
+if ! free_space_until 0; then
+  info "  WARNING: still below the free-space floor with only the newest backup of each kind left; free disk space on this host."
 fi
 
 # Say plainly how much room is left. The failure this guards against is a

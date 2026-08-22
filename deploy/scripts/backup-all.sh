@@ -3,6 +3,7 @@
 #
 # Usage:
 #   sudo ./deploy/scripts/backup-all.sh [--dest <dir>] [--keep-days 14]
+#        [--keep-full 2] [--keep-db 30] [--min-free-gb 5] [--min-free-pct 10]
 #        [--no-deliverables] [--raw] [--dry-run] [--continue-on-error]
 #
 # All options are forwarded to backup-instance.sh. Exit code is non-zero if any
@@ -18,7 +19,7 @@ FORWARD_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --continue-on-error) CONTINUE_ON_ERROR=1; shift ;;
-    --dest|--keep-days|--keep-count|--max-total-gb) FORWARD_ARGS+=("$1" "${2:?}"); shift 2 ;;
+    --dest|--keep-days|--keep-count|--keep-full|--keep-db|--max-total-gb|--min-free-gb|--min-free-pct) FORWARD_ARGS+=("$1" "${2:?}"); shift 2 ;;
     --no-deliverables|--raw|--dry-run) FORWARD_ARGS+=("$1"); shift ;;
     -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Unknown argument: $1" ;;
