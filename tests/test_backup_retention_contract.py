@@ -199,3 +199,25 @@ def test_the_documentation_describes_the_floor():
         "the docs must state that a backup with no room aborts rather than "
         "filling the disk, because that is the surprising part"
     )
+
+
+def test_age_pruning_spares_database_only_backups():
+    """--keep-db must be reachable.
+
+    Age used to expire both kinds, so a 14-day age limit capped the daily
+    database backups at 14 no matter what --keep-db said. They cost ~2 MB
+    against a full backup's ~2 GB; expiring them buys nothing and throws away
+    the cheapest restore points there are.
+    """
+    text = _executable_source(VPS)
+    age_block = text[text.index('KEEP_DAYS:-0'):]
+    age_block = age_block[: age_block.index('prune_by_kind_count')]
+    assert 'backup_kind' in age_block, (
+        "age pruning does not distinguish full from database-only backups, so "
+        "--keep-db can never be reached"
+    )
+    assert 'NEWEST_FULL' in age_block, (
+        "age pruning does not spare the newest full backup; if the weekly job "
+        "has been failing, that stale copy is the only copy of the deliverables"
+    )
+

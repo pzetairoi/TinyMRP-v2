@@ -11,7 +11,9 @@
 #
 # Retention. Any limit can prune; the newest backup OF EACH KIND is never
 # pruned, whatever they say:
-#   --keep-days N      default 14, age
+#   --keep-days N      default 14, age. FULL backups only - a database-only
+#                      backup is ~2 MB against ~2 GB, so --keep-db governs
+#                      those and a month of them is nearly free.
 #   --keep-full N      default 2,  how many full backups exist
 #   --keep-db N        default 30, how many database-only backups exist
 #   --keep-count N     default 0 (off), a ceiling across both kinds
@@ -203,7 +205,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
   info "[dry-run]   mongodump: docker exec ${MONGO_CONTAINER_NAME} mongodump -d ${MONGO_DB} --archive --gzip"
   [ "$WITH_DELIVERABLES" -eq 1 ] && info "[dry-run]   deliverables: tar of ${DELIVERABLES_DIR:-<unset>}"
   [ "$WITH_RAW" -eq 1 ] && info "[dry-run]   raw mongo files: stop instance, tar ${MONGO_DATA_DIR:-<unset>}, start instance"
-  info "[dry-run]   retention: prune ${DEST_ROOT}/${INSTANCE_NAME}/* older than ${KEEP_DAYS} days; keep at most ${KEEP_FULL} full and ${KEEP_DB} database-only backups"
+  info "[dry-run]   retention: expire FULL backups older than ${KEEP_DAYS} days; keep at most ${KEEP_FULL} full and ${KEEP_DB} database-only backups"
   info "[dry-run]   free-space floor: keep the greater of ${MIN_FREE_GB} GB or ${MIN_FREE_PCT}% free; the newest full and newest database-only backup are never pruned"
   exit 0
 fi
@@ -336,9 +338,28 @@ prune_backup_dirs() {
 }
 
 if [ "${KEEP_DAYS:-0}" -gt 0 ] 2>/dev/null; then
-  # -mtime +N never matches the backup just written, so the newest is safe.
-  mapfile -t OLD_BY_AGE < <(find "${DEST_ROOT}/${INSTANCE_NAME}" -mindepth 1 -maxdepth 1 -type d -mtime +"$KEEP_DAYS" 2>/dev/null)
-  [ "${#OLD_BY_AGE[@]}" -gt 0 ] && prune_backup_dirs "older than ${KEEP_DAYS} days" "${OLD_BY_AGE[@]}"
+  # Age expires FULL backups only. A database-only backup is ~2 MB against a
+  # full one's ~2 GB, so a month of them costs less than a rounding error on a
+  # single full backup - --keep-db governs those instead. Age is here to stop
+  # the expensive kind piling up, and applying it to both made --keep-db
+  # unreachable: 14 days of dailies capped it at 14 whatever the number said.
+  #
+  # The newest full backup is never expired, however old it is. If the weekly
+  # job has been failing for a month, that stale copy is the ONLY copy of the
+  # deliverables, and its birthday is the worst possible moment to delete it.
+  mapfile -t NEWEST_FULL_LIST < <(list_backups_of_kind_newest_first full)
+  NEWEST_FULL="${NEWEST_FULL_LIST[0]:-}"
+  OLD_BY_AGE=()
+  while IFS= read -r aged_dir; do
+    [ -n "$aged_dir" ] || continue
+    if [ "$aged_dir" = "$NEWEST_FULL" ]; then
+      continue
+    fi
+    if [ "$(backup_kind "$aged_dir")" = "full" ]; then
+      OLD_BY_AGE+=("$aged_dir")
+    fi
+  done < <(find "${DEST_ROOT}/${INSTANCE_NAME}" -mindepth 1 -maxdepth 1 -type d -mtime +"$KEEP_DAYS" 2>/dev/null)
+  [ "${#OLD_BY_AGE[@]}" -gt 0 ] && prune_backup_dirs "full backups older than ${KEEP_DAYS} days" "${OLD_BY_AGE[@]}"
 fi
 
 # Counted per kind. Sharing one ceiling let a single 2 GB full backup evict a

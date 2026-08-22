@@ -236,10 +236,20 @@ pruned**, whatever the limits say:
 
 | Option | Default | Bounds |
 | --- | --- | --- |
-| `--keep-days` | 14 | Age |
+| `--keep-days` | 14 | Age — **full backups only** |
 | `--keep-full` | 2 | How many **full** backups exist |
 | `--keep-db` | 30 | How many **database-only** backups exist |
 | `--max-total-gb` | 10 | The backup folder for one instance |
+
+Age expires full backups only. A database-only backup is about 2 MB against a
+full one's 2 GB, so a month of them costs less than a rounding error on a single
+full backup — `--keep-db` governs those instead. Applying age to both made
+`--keep-db` unreachable: 14 days of daily backups capped it at 14 whatever the
+number said.
+
+The **newest full backup is never expired by age**, however old it is. If the
+weekly job has been failing for a month, that stale copy is the only copy of the
+deliverables, and its birthday is the worst possible moment to delete it.
 
 Full and database-only backups are counted **separately** because they differ by
 three orders of magnitude — roughly 2 GB against 2 MB. They used to share one
