@@ -18,6 +18,8 @@ class UserNotification(Document):
     revision = StringField(default="")
     thread_id = StringField(default="")
     comment_id = StringField(default="")
+    lifecycle = StringField(default="", choices=("", "current", "history"))
+    lifecycle_reason = StringField(default="")
     created_at = DateTimeField(default=utc_now)
     read_at = DateTimeField()
 
@@ -27,5 +29,9 @@ class UserNotification(Document):
         "indexes": [
             {"fields": ["recipient", "-created_at"], "name": "notification_recipient_created_idx"},
             {"fields": ["recipient", "read_at", "-created_at"], "name": "notification_unread_idx"},
+            {
+                "fields": ["recipient", "lifecycle", "-created_at"],
+                "name": "notification_lifecycle_idx",
+            },
         ],
     }

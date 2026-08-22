@@ -115,7 +115,12 @@ from app.services.part_annotations import (
     set_part_comment_status,
     set_part_notes,
 )
-from app.services.notifications import create_notifications, notify_part_activity, part_url
+from app.services.notifications import (
+    create_notifications,
+    notify_part_activity,
+    part_url,
+    sync_linked_notification_lifecycle,
+)
 from app.services.user_profile import (
     resolve_identity_profile,
     resolve_identity_profiles,
@@ -1955,6 +1960,17 @@ def part_comments_delete(pn):
             part_number=p.part_number,
             revision=p.revision or "",
             comment_id=str(removed.get("id") or ""),
+            lifecycle="history",
+            lifecycle_reason="deleted",
+        )
+    except Exception:
+        pass
+    try:
+        sync_linked_notification_lifecycle(
+            p,
+            comment_id=str(removed.get("id") or ""),
+            current=False,
+            reason="deleted",
         )
     except Exception:
         pass
@@ -1997,6 +2013,17 @@ def part_comments_status(pn):
             part_number=p.part_number,
             revision=p.revision or "",
             comment_id=comment_id,
+            lifecycle="history" if status == "resolved" else "current",
+            lifecycle_reason=status,
+        )
+    except Exception:
+        pass
+    try:
+        sync_linked_notification_lifecycle(
+            p,
+            comment_id=comment_id,
+            current=status == "open",
+            reason=status,
         )
     except Exception:
         pass

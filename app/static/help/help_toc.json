@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-08-21 23:51 UTC",
-  "commit": "3e791d0",
+  "generated_at": "2026-08-22 00:06 UTC",
+  "commit": "3a7876e",
   "items": [
     {
       "id": "getting-started",
@@ -39,6 +39,10 @@
         {
           "id": "finding-your-way-around",
           "title": "Finding your way around"
+        },
+        {
+          "id": "home-and-notifications",
+          "title": "Home and notifications"
         },
         {
           "id": "inventory",

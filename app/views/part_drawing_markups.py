@@ -32,7 +32,7 @@ from app.services.part_drawing_markups import (
     validate_canvas_json,
 )
 from app.services.part_norm import clean_rev, clean_rev_or_none
-from app.services.notifications import notify_part_activity
+from app.services.notifications import notify_part_activity, sync_linked_notification_lifecycle
 from app.services.part_review_status import sync_part_review_status
 
 logger = logging.getLogger(__name__)
@@ -443,6 +443,16 @@ def drawing_markup_thread_patch(pn: str, thread_id: str):
         )
     except Exception:
         logger.warning("markup thread update notification failed", exc_info=True)
+    if action:
+        try:
+            sync_linked_notification_lifecycle(
+                part,
+                thread_id=str(thread.id),
+                current=action == "reopen",
+                reason="open" if action == "reopen" else "resolved",
+            )
+        except Exception:
+            logger.warning("markup notification lifecycle sync failed", exc_info=True)
     sync_part_review_status(part)
     return _markup_response(doc, part=part, pf=pf, fingerprint=fingerprint, page_number=page_number)
 
@@ -485,5 +495,14 @@ def drawing_markup_thread_delete(pn: str, thread_id: str):
         )
     except Exception:
         logger.warning("markup thread delete notification failed", exc_info=True)
+    try:
+        sync_linked_notification_lifecycle(
+            part,
+            thread_id=str(thread_id),
+            current=False,
+            reason="deleted",
+        )
+    except Exception:
+        logger.warning("markup notification lifecycle sync failed", exc_info=True)
     sync_part_review_status(part)
     return _markup_response(doc, part=part, pf=pf, fingerprint=fingerprint, page_number=page_number)

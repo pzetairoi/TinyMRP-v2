@@ -24,6 +24,40 @@ A bell icon appears beside your name when you have notifications.
 
 ---
 
+## Home and notifications
+
+**Where to find it:** sign in, or choose **My Account** from your name in the
+top-right menu.
+
+The **Notifications** panel is a work queue. When you first open Home it shows
+only items that are still current:
+
+- An open comment or drawing review appears once, using its latest activity.
+- Resolving or deleting the comment/review moves its notifications out of the
+  current list.
+- **Show history** reveals resolved, deleted and earlier activity without
+  mixing it into the work still to do. The button appears when history exists.
+
+To work through the list:
+
+1. Open a notification and deal with the linked comment or review on the part.
+2. Resolve it when the work is complete, or delete it when the conversation
+   should be removed from the part.
+3. Return to Home. The item is now under **Show history**, not in the current
+   list. Reopening the conversation makes its latest notification current
+   again.
+
+**Mark all read** clears the unread emphasis; it does not close work. An open
+comment or review remains in the current list until somebody resolves or
+deletes it. History keeps the notification text for context, but a deleted
+comment is not restored to the part by opening its historical notification.
+
+**Troubleshooting:** if a status changed in another browser tab, refresh Home.
+Items for parts or comments you can no longer access are not shown in either
+the current list or history.
+
+---
+
 ## Inventory
 
 **What it is for:** finding a part revision and getting to its details.

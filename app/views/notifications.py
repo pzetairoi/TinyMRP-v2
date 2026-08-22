@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
+from mongoengine.queryset.visitor import Q
 
 from app.models.auth import User
 from app.models.notification import UserNotification
@@ -11,6 +12,7 @@ from app.services.authorization import (
     has_permission,
     uses_portal_presentation,
 )
+from app.services.notifications import notification_lifecycle, persist_notification_lifecycle
 from app.services.timezone_utils import utc_iso, utc_now
 from app.services.user_profile import profile_for_user
 
@@ -18,8 +20,8 @@ from app.services.user_profile import profile_for_user
 bp = Blueprint("notifications_api", __name__, url_prefix="/api")
 
 
-def _payload(row: UserNotification) -> dict:
-    return {
+def _payload(row: UserNotification, lifecycle: str = "", lifecycle_reason: str = "") -> dict:
+    payload = {
         "id": str(row.id),
         "kind": row.kind,
         "title": row.title,
@@ -34,6 +36,10 @@ def _payload(row: UserNotification) -> dict:
         "read_at": utc_iso(row.read_at),
         "unread": row.read_at is None,
     }
+    if lifecycle:
+        payload["lifecycle"] = lifecycle
+        payload["lifecycle_reason"] = lifecycle_reason
+    return payload
 
 
 @bp.get("/notifications")
@@ -44,12 +50,71 @@ def notifications_list():
         limit = max(1, min(100, int(request.args.get("limit") or 20)))
     except (TypeError, ValueError):
         limit = 20
-    query = UserNotification.objects(recipient=user)
+    view = str(request.args.get("view") or "current").strip().lower()
+    if view not in {"current", "history", "all"}:
+        return jsonify({"ok": False, "error": "invalid_view"}), 400
+    base_query = UserNotification.objects(recipient=user)
     if str(request.args.get("unread_only") or "").lower() in ("1", "true", "yes"):
-        query = query.filter(read_at=None)
-    rows = list(query.order_by("-created_at")[:limit])
-    unread_count = UserNotification.objects(recipient=user, read_at=None).count()
-    return jsonify({"ok": True, "unread_count": unread_count, "notifications": [_payload(row) for row in rows]})
+        base_query = base_query.filter(read_at=None)
+
+    # Existing installations predate lifecycle fields. Classify those events
+    # once, then persist the result so normal bell polling remains indexed and
+    # bounded. Rechecking the small current set also catches out-of-band deletes.
+    while True:
+        unclassified = list(
+            base_query.filter(Q(lifecycle="") | Q(lifecycle__exists=False))
+            .order_by("-created_at")[:500]
+        )
+        if not unclassified:
+            break
+        legacy_current, legacy_history = notification_lifecycle(
+            unclassified,
+            user,
+        )
+        persist_notification_lifecycle(legacy_current, "current")
+        persist_notification_lifecycle(legacy_history, "history")
+
+    verification_limit = max(100, limit * 2)
+    current_candidates = list(
+        base_query.filter(lifecycle="current").order_by("-created_at")[:verification_limit]
+    )
+    verified_current, newly_historical = notification_lifecycle(current_candidates, user)
+    persist_notification_lifecycle(verified_current, "current")
+    persist_notification_lifecycle(newly_historical, "history")
+
+    current_query = base_query.filter(lifecycle="current").order_by("-created_at")
+    history_query = base_query.filter(
+        lifecycle="history",
+        lifecycle_reason__ne="inaccessible",
+    ).order_by("-created_at")
+    current_count = current_query.count()
+    history_count = history_query.count()
+    current_unread_count = current_query.filter(read_at=None).count()
+    if view == "current":
+        payload_rows = [
+            _payload(row, "current", row.lifecycle_reason)
+            for row in current_query[:limit]
+        ]
+    elif view == "history":
+        payload_rows = [
+            _payload(row, "history", row.lifecycle_reason)
+            for row in history_query[:limit]
+        ]
+    else:
+        combined = list(current_query[:limit]) + list(history_query[:limit])
+        combined.sort(key=lambda row: row.created_at, reverse=True)
+        payload_rows = [
+            _payload(row, row.lifecycle, row.lifecycle_reason)
+            for row in combined[:limit]
+        ]
+    return jsonify({
+        "ok": True,
+        "view": view,
+        "unread_count": current_unread_count,
+        "current_count": current_count,
+        "history_count": history_count,
+        "notifications": payload_rows,
+    })
 
 
 @bp.post("/notifications/<notification_id>/read")

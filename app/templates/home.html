@@ -11,10 +11,27 @@
           <div class="account-section-title">Notifications</div>
           <div class="small text-muted">Mentions and review activity that need your attention.</div>
         </div>
-        <button class="btn btn-sm btn-outline-secondary" type="button" id="accountNotificationsReadAll">Mark all read</button>
+        <div class="d-flex flex-wrap gap-2">
+          <button
+            class="btn btn-sm btn-outline-secondary"
+            type="button"
+            id="accountNotificationsHistoryToggle"
+            aria-controls="accountNotificationHistory"
+            aria-expanded="false"
+            hidden
+          >Show history</button>
+          <button class="btn btn-sm btn-outline-secondary" type="button" id="accountNotificationsReadAll">Mark all read</button>
+        </div>
       </div>
       <div id="accountNotificationList" class="tm-account-notification-list">
         <div class="tm-notification-empty">Loading notifications...</div>
+      </div>
+      <div id="accountNotificationHistory" class="mt-3" hidden>
+        <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+          <div class="small fw-semibold">Notification history</div>
+          <div class="small text-muted" id="accountNotificationHistorySummary"></div>
+        </div>
+        <div id="accountNotificationHistoryList" class="tm-account-notification-list"></div>
       </div>
     </section>
 
@@ -366,15 +383,26 @@
 <script nonce="{{ csp_nonce() }}">
   (() => {
     const list = document.getElementById('accountNotificationList');
+    const history = document.getElementById('accountNotificationHistory');
+    const historyList = document.getElementById('accountNotificationHistoryList');
+    const historySummary = document.getElementById('accountNotificationHistorySummary');
+    const historyToggle = document.getElementById('accountNotificationsHistoryToggle');
     const readAll = document.getElementById('accountNotificationsReadAll');
     if (!list) return;
-    const render = (rows) => {
-      list.replaceChildren();
+    let historyLoaded = false;
+    const historyLabels = {
+      deleted: 'Deleted',
+      previous_activity: 'Previous activity',
+      read: 'Read',
+      resolved: 'Resolved',
+    };
+    const render = (target, rows, emptyText) => {
+      target.replaceChildren();
       if (!rows.length) {
         const empty = document.createElement('div');
         empty.className = 'tm-notification-empty';
-        empty.textContent = 'You are all caught up.';
-        list.appendChild(empty);
+        empty.textContent = emptyText;
+        target.appendChild(empty);
         return;
       }
       rows.forEach((row) => {
@@ -388,23 +416,58 @@
         const meta = document.createElement('small');
         const created = row.created_at ? new Date(row.created_at).toLocaleString() : '';
         meta.textContent = [row.actor_email || '', created].filter(Boolean).join(' · ');
+        const lifecycle = row.lifecycle === 'history' ? historyLabels[row.lifecycle_reason] : '';
+        if (lifecycle) meta.prepend(`${lifecycle} · `);
         item.append(title, body, meta);
         item.addEventListener('click', () => fetch(`/api/notifications/${encodeURIComponent(row.id)}/read`, { method: 'POST', keepalive: true }));
-        list.appendChild(item);
+        target.appendChild(item);
       });
+    };
+    const loadHistory = async () => {
+      if (!historyList) return;
+      try {
+        const response = await fetch('/api/notifications?view=history&limit=50');
+        if (!response.ok) return;
+        const data = await response.json();
+        const rows = Array.isArray(data.notifications) ? data.notifications : [];
+        const total = Number(data.history_count || 0);
+        render(historyList, rows, 'No historical notifications.');
+        if (historySummary) {
+          historySummary.textContent = total > rows.length
+            ? `Showing ${rows.length} most recent of ${total}`
+            : `${total} historical ${total === 1 ? 'item' : 'items'}`;
+        }
+        historyLoaded = true;
+      } catch (_) {}
     };
     const load = async () => {
       try {
-        const response = await fetch('/api/notifications?limit=50');
+        const response = await fetch('/api/notifications?view=current&limit=50');
         if (!response.ok) return;
         const data = await response.json();
-        render(Array.isArray(data.notifications) ? data.notifications : []);
+        const rows = Array.isArray(data.notifications) ? data.notifications : [];
+        const historyCount = Number(data.history_count || 0);
+        render(list, rows, 'No current notifications. You are all caught up.');
+        if (historyToggle) {
+          historyToggle.hidden = historyCount === 0;
+          historyToggle.textContent = `${history?.hidden === false ? 'Hide' : 'Show'} history (${historyCount})`;
+        }
       } catch (_) {}
     };
+    historyToggle?.addEventListener('click', async () => {
+      if (!history) return;
+      const willOpen = history.hidden;
+      history.hidden = !willOpen;
+      historyToggle.setAttribute('aria-expanded', String(willOpen));
+      historyToggle.textContent = `${willOpen ? 'Hide' : 'Show'} history`;
+      if (willOpen && !historyLoaded) await loadHistory();
+      await load();
+    });
     readAll?.addEventListener('click', async () => {
       try { await fetch('/api/notifications/read-all', { method: 'POST' }); } catch (_) {}
       window.dispatchEvent(new Event('tinymrp:notifications-refresh'));
       await load();
+      if (history?.hidden === false) await loadHistory();
     });
     load();
   })();
