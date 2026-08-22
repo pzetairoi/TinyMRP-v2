@@ -203,7 +203,8 @@ if [ "$DRY_RUN" -eq 1 ]; then
   info "[dry-run]   mongodump: docker exec ${MONGO_CONTAINER_NAME} mongodump -d ${MONGO_DB} --archive --gzip"
   [ "$WITH_DELIVERABLES" -eq 1 ] && info "[dry-run]   deliverables: tar of ${DELIVERABLES_DIR:-<unset>}"
   [ "$WITH_RAW" -eq 1 ] && info "[dry-run]   raw mongo files: stop instance, tar ${MONGO_DATA_DIR:-<unset>}, start instance"
-  info "[dry-run]   retention: prune ${DEST_ROOT}/${INSTANCE_NAME}/* older than ${KEEP_DAYS} days"
+  info "[dry-run]   retention: prune ${DEST_ROOT}/${INSTANCE_NAME}/* older than ${KEEP_DAYS} days; keep at most ${KEEP_FULL} full and ${KEEP_DB} database-only backups"
+  info "[dry-run]   free-space floor: keep the greater of ${MIN_FREE_GB} GB or ${MIN_FREE_PCT}% free; the newest full and newest database-only backup are never pruned"
   exit 0
 fi
 
