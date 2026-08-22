@@ -197,3 +197,63 @@ except ValueError:
 raise SystemExit(0 if common == parent else 1)
 PY
 }
+
+# Keep the app image every container is using, and the one image each instance
+# can roll back to. Remove the rest.
+#
+# Every update leaves an 825 MB image behind, and nothing removed them: one host
+# reached 96% full carrying 21 stale copies, most of a single day's deploys. But
+# "prune everything unused" is wrong here, because rollback-instance.sh needs
+# the PREVIOUS image and no container is running it - so what survives is
+# computed from the instances themselves rather than from what Docker thinks is
+# idle.
+#
+# Never touches images that are not tinymrp-app: mongo, caddy and the rest are
+# pulled, not built here, and re-pulling them costs bandwidth for no gain.
+prune_old_app_images() {
+  local keep_file removed=0 image
+  command -v docker >/dev/null 2>&1 || return 0
+  keep_file="$(mktemp)"
+
+  # In use right now, by any instance on this host.
+  docker ps -a --format '{{.Image}}' 2>/dev/null | grep '^tinymrp-app:' >>"$keep_file" || true
+
+  # The rollback target each instance recorded. Only the LATEST update per
+  # instance: every past update recorded a previous image too, and honouring
+  # all of them would keep every image the host has ever built, which is the
+  # problem this function exists to solve.
+  #
+  # The values are shell-quoted in metadata.env, so the quotes come off before
+  # comparing. Without that this matched nothing and would have deleted the
+  # rollback image - caught by a dry run before it ran anywhere.
+  local instance_dir instance_name latest previous
+  for instance_dir in "$(instances_dir)"/*/; do
+    [ -d "$instance_dir" ] || continue
+    instance_name="$(basename "$instance_dir")"
+    latest="$(latest_instance_update_metadata_file "$instance_name" 2>/dev/null || true)"
+    [ -n "$latest" ] && [ -f "$latest" ] || continue
+    previous="$(sed -n 's/^PREVIOUS_IMAGE_TAG="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$latest" | tail -n 1)"
+    case "$previous" in tinymrp-app:*) printf '%s\n' "$previous" >>"$keep_file" ;; esac
+  done
+  local compose
+  for compose in "$(instances_dir)"/*/compose.yml; do
+    [ -f "$compose" ] || continue
+    grep -oE 'tinymrp-app:[A-Za-z0-9._-]+' "$compose" >>"$keep_file" 2>/dev/null || true
+  done
+
+  # The alias the build tags, so a fresh instance can still be created.
+  printf 'tinymrp-app:latest\n' >>"$keep_file"
+
+  sort -u -o "$keep_file" "$keep_file"
+  while IFS= read -r image; do
+    [ -n "$image" ] || continue
+    grep -qxF "$image" "$keep_file" && continue
+    docker rmi "$image" >/dev/null 2>&1 && removed=$((removed + 1))
+  done < <(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep '^tinymrp-app:' || true)
+  rm -f "$keep_file"
+
+  if [ "$removed" -gt 0 ]; then
+    printf 'Removed %s superseded app image(s); the running and rollback images were kept.\n' "$removed"
+  fi
+  return 0
+}

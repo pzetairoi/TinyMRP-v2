@@ -366,6 +366,11 @@ RESULT="success"
 write_instance_current_state "$INSTANCE_NAME" "$NEW_GIT_COMMIT" "$NEW_IMAGE_TAG" "$UPDATE_ID" "update"
 pass "Instance ${INSTANCE_NAME} is now running ${NEW_IMAGE_TAG}"
 
+# Only after the new image is proven healthy and the rollback target recorded.
+# Housekeeping must never be what breaks an update, so this runs last and its
+# failure is not the update's failure.
+prune_old_app_images || true
+
 printf '\nInstance update complete.\n'
 printf 'Instance: %s\n' "$INSTANCE_NAME"
 printf 'Previous image: %s\n' "$PREVIOUS_IMAGE_TAG"
