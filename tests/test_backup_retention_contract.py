@@ -1,11 +1,22 @@
 """The two backup implementations must not drift apart on safety.
 
-TinyMRP backs up through two separate paths, deliberately:
+TinyMRP backs up through THREE separate paths, deliberately:
 
   deploy/scripts/backup-instance.sh   the VPS fleet, many instances per host
-  deploy/community/tinymrp.sh         a single instance, shipped as a
+  deploy/community/tinymrp.sh         a single instance on Linux, shipped as a
                                       self-contained bundle that must keep
                                       working when downloaded on its own
+  deploy/community/tinymrp.ps1        the same bundle on Windows/Docker Desktop
+
+The first two carry the full policy. The PowerShell bundle deliberately does
+not: it is the least-used path and wiring it was not worth the risk, so it
+keeps its simpler retention. What it MUST share is the safety-critical default,
+and that is asserted below - a Windows install that started capturing
+gigabytes of deliverables by default would be the same disk-filling bug on a
+machine nobody is watching.
+
+Counting these wrong is easy: an earlier version of this file said "two", and
+the Windows bundle went unexamined as a result.
 
 The bundle cannot source deploy/scripts/lib/, which is why the logic is written
 twice. That is a packaging constraint, not a feature tier - but it means a fix
@@ -336,4 +347,39 @@ def test_the_backups_page_is_documented_where_people_look():
     assert "admin.admin_backups" in nav, (
         "the navigation does not link to the backups page"
     )
+
+
+BUNDLE_PS1 = REPO / "deploy" / "community" / "tinymrp.ps1"
+
+
+def test_the_windows_bundle_also_defaults_to_database_only():
+    """The one property all three paths must agree on.
+
+    The PowerShell bundle does not carry the free-space floor or the separate
+    destination - that is a deliberate scope decision, not an oversight. But
+    deliverables must be off unless asked for there too.
+    """
+    text = BUNDLE_PS1.read_text(encoding="utf-8")
+    assert "[switch]$IncludeDeliverables" in text, (
+        "deliverables must be opt-in on Windows: a PowerShell [switch] is false "
+        "unless passed, which is what makes database-only the default"
+    )
+    assert "Backup-Stack ([bool]$IncludeDeliverables)" in text, (
+        "the backup entry point must pass the opt-in through rather than "
+        "hardcoding deliverables on"
+    )
+
+
+def test_nothing_on_windows_invokes_the_shell_backup_scripts():
+    """Windows has no bash; a cross-call would fail at run time, not at test time."""
+    for folder in ("windows", "windows-restricted"):
+        for path in (REPO / "deploy" / folder).rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in {".ps1", ".cmd", ".bat"}:
+                continue
+            body = path.read_text(encoding="utf-8", errors="replace")
+            for script in ("backup-instance.sh", "backup-all.sh", "tinymrp.sh"):
+                assert script not in body, (
+                    f"{path.name} references {script}; the Windows deployments "
+                    "have no shell to run it in"
+                )
 
