@@ -1,0 +1,144 @@
+{% extends "security/base.html" %}
+{% from "ui/_components.html" import page_header %}
+{% block title %}Backups — Admin{% endblock %}
+{% block content %}
+{% call page_header("Backups", "What is being captured, where it goes, and what it costs.", "Admin") %}{% endcall %}
+
+<div class="card shadow-sm tm-card mb-3">
+  <div class="card-body">
+    <p class="text-muted mb-2">
+      Backups run on the <strong>host</strong>, on a schedule. This page reports;
+      it cannot start, change or delete one. That is deliberate — the application
+      has no privileged access to the host, and granting it any would turn a
+      problem in the web app into a problem with the whole machine.
+    </p>
+
+    {% if not summary.available %}
+    <div class="alert alert-warning py-2 small mb-0">
+      <strong>No backups directory is visible to this instance.</strong>
+      Newer deployments mount one automatically; an older one may predate it.
+    </div>
+    {% else %}
+
+    {% set pol = summary.policy %}
+    {% if pol %}
+    <h6 class="mt-3">What gets backed up</h6>
+    <ul class="list-unstyled small mb-3">
+      <li class="mb-1">
+        <span class="badge bg-success">Database</span>
+        every day. A few MB, and the one thing that cannot be rebuilt from CAD.
+      </li>
+      <li>
+        {% if pol.deliverables_included %}
+        <span class="badge bg-success">Deliverables</span>
+        {{ pol.deliverables_frequency_label }}, roughly
+        <strong>{{ human_bytes(pol.deliverables_estimated_bytes) }}</strong> a copy.
+        {% if pol.deliverables_offsite %}
+        Written to <code>{{ pol.deliverables_destination }}</code>.
+        {% else %}
+        <span class="text-warning-emphasis">Kept beside the database backup — the
+          same disk as the files they protect. That covers a mistake, not a lost
+          drive.</span>
+        {% endif %}
+        {% else %}
+        <span class="badge bg-secondary">Deliverables</span>
+        not backed up. They are large and can usually be regenerated from CAD, so
+        they stay off until somebody asks for them.
+        {% endif %}
+      </li>
+    </ul>
+    {% endif %}
+
+    {% if summary.disk %}
+    {% set disk = summary.disk %}
+    {% set pct = (disk.used_bytes * 100 // disk.total_bytes) if disk.total_bytes else 0 %}
+    <h6>Room left</h6>
+    <p class="small mb-1">
+      <strong>{{ human_bytes(disk.free_bytes) }}</strong> free of
+      {{ human_bytes(disk.total_bytes) }} ({{ pct }}% used).
+      Backups here occupy <strong>{{ human_bytes(summary.total_bytes) }}</strong>{% if summary.offsite_bytes %},
+      plus {{ human_bytes(summary.offsite_bytes) }} on another drive{% endif %}.
+    </p>
+    <div class="progress mb-3" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ pct }}">
+      <div class="progress-bar{% if pct >= 90 %} bg-danger{% elif pct >= 75 %} bg-warning{% endif %}"
+           style="width: {{ pct }}%">{{ pct }}%</div>
+    </div>
+    {% endif %}
+
+    {% if summary.count == 0 %}
+    <div class="alert alert-warning py-2 small mb-0">
+      <strong>No backups found.</strong> If this instance holds real data, install
+      the scheduled job on the host:
+      <code>sudo ./deploy/scripts/install-backup-job.sh</code>
+    </div>
+    {% else %}
+    <h6>What you have</h6>
+    <p class="small text-muted mb-2">
+      {{ summary.count }} backup{{ '' if summary.count == 1 else 's' }}, newest first —
+      {{ summary.full_count }} with files, {{ summary.database_count }} database-only.
+    </p>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle">
+        <thead>
+          <tr>
+            <th scope="col">Backup</th>
+            <th scope="col">Holds</th>
+            <th scope="col">Taken</th>
+            <th scope="col" class="text-end">Size</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in summary.backups %}
+          <tr>
+            <td><code>{{ row.name }}</code>
+              {% if row.looks_empty %}
+              <span class="badge bg-danger ms-1" title="The database archive is too small to contain documents">looks empty</span>
+              {% endif %}
+            </td>
+            <td class="small">
+              {% if row.kind == 'full' %}
+              <span class="badge bg-primary">Database + files</span>
+              {% if row.deliverables_elsewhere %}
+              <div class="text-muted">files on <code>{{ row.deliverables_elsewhere }}</code></div>
+              {% endif %}
+              {% else %}
+              <span class="badge bg-secondary">Database only</span>
+              {% endif %}
+            </td>
+            <td class="small text-muted">
+              {{ row.created_at.strftime('%Y-%m-%d %H:%M UTC') if row.created_at else '—' }}
+            </td>
+            <td class="text-end">
+              {{ human_bytes(row.size_bytes) }}
+              {% if row.deliverables_elsewhere and row.deliverables_bytes %}
+              <div class="small text-muted">+ {{ human_bytes(row.deliverables_bytes) }} off-drive</div>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+    {% endif %}
+  </div>
+</div>
+
+<div class="card shadow-sm tm-card">
+  <div class="card-body">
+    <h6>Restoring, and changing what is captured</h6>
+    <p class="small text-muted">
+      Both are host actions. Restoring overwrites a live database and can overlay
+      gigabytes of files, so it asks for confirmation at a terminal rather than
+      behind a button here.
+    </p>
+    <p class="small mb-1">Restore one backup:</p>
+    <pre class="small bg-body-tertiary p-2 rounded"><code>sudo ./deploy/scripts/restore-instance.sh &lt;instance&gt; /srv/tinymrp/backups/&lt;instance&gt;/&lt;backup&gt;</code></pre>
+    <p class="small mb-1">Start capturing deliverables, onto another drive:</p>
+    <pre class="small bg-body-tertiary p-2 rounded"><code>sudo ./deploy/scripts/backup-all.sh --deliverables-dest /mnt/backupdrive/tinymrp --deliverables-frequency monthly</code></pre>
+    <p class="small text-muted mb-0">
+      Full reference: <code>docs/deployment/10-operations.md</code>.
+    </p>
+  </div>
+</div>
+{% endblock %}

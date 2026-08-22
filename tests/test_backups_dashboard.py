@@ -222,3 +222,78 @@ def test_the_summary_survives_unreadable_settings(backups_dir, monkeypatch):
 
     assert report["policy"] is None
     assert report["count"] == 1
+
+
+# --- the page has to be reachable, and gated -------------------------------
+
+
+def _admin(app, permissions):
+    from app.models.auth import Role, User
+    import uuid
+
+    role = Role(name=f"backup-role-{uuid.uuid4()}", permissions=list(permissions)).save()
+    return User(
+        email=f"{uuid.uuid4()}@example.com",
+        password="test",
+        active=True,
+        fs_uniquifier=str(uuid.uuid4()),
+        roles=[role],
+    ).save()
+
+
+def _login(client, user):
+    with client.session_transaction() as sess:
+        sess["_user_id"] = user.get_id()
+        sess["_fresh"] = True
+
+
+def test_the_backups_page_renders_for_an_operator(client, app):
+    """It is the page somebody opens when worried, so it must always render."""
+    with app.app_context():
+        user = _admin(app, ["system.maintenance", "system.config.read"])
+    _login(client, user)
+
+    response = client.get("/admin/backups")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "What gets backed up" in body or "No backups directory" in body
+    assert "restore-instance.sh" in body, (
+        "the page must show how to restore, since it deliberately has no button"
+    )
+
+
+def test_the_backups_page_is_gated(client, app):
+    with app.app_context():
+        user = _admin(app, ["parts.read"])
+    _login(client, user)
+
+    assert client.get("/admin/backups").status_code == 403
+
+
+def test_the_backups_page_survives_an_unreadable_backup_directory(client, app, monkeypatch):
+    """A moved directory must not take the page down."""
+    def _boom(*_args, **_kwargs):
+        raise OSError("gone")
+
+    monkeypatch.setattr(backups, "summary", _boom)
+    with app.app_context():
+        user = _admin(app, ["system.maintenance"])
+    _login(client, user)
+
+    response = client.get("/admin/backups")
+
+    assert response.status_code == 200
+    assert "No backups directory" in response.get_data(as_text=True)
+
+
+def test_the_admin_navigation_links_to_backups(client, app):
+    """Buried on a page nobody visits is the same as not existing."""
+    with app.app_context():
+        user = _admin(app, ["system.maintenance", "system.config.read"])
+    _login(client, user)
+
+    body = client.get("/admin/backups").get_data(as_text=True)
+
+    assert "/admin/backups" in body
+    assert ">Backups</a>" in body, "no navigation entry points at the page"

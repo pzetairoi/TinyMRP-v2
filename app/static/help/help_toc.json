@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-08-22 03:37 UTC",
-  "commit": "bbd0baa",
+  "generated_at": "2026-08-22 23:04 UTC",
+  "commit": "be605a2",
   "items": [
     {
       "id": "getting-started",
@@ -299,6 +299,10 @@
         {
           "id": "upload-pack-housekeeping",
           "title": "Upload pack housekeeping"
+        },
+        {
+          "id": "backups-adminbackups",
+          "title": "Backups (`/admin/backups`)"
         },
         {
           "id": "audit-and-metrics",

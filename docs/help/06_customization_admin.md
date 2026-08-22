@@ -10,6 +10,7 @@ Main admin modules:
 - Roles
 - Audit Log
 - Metrics
+- Backups
 - App Settings
 - Add-in Admin
 - Jobs, Suppliers, Customers, Orders shortcuts
@@ -177,6 +178,24 @@ the disk cost is unchanged and only the working folder gets tidier.
 
 The sweep runs after an import, at most once a day, so there is nothing to
 schedule or install. Set the retention to **0** to switch it off entirely.
+
+## Backups (`/admin/backups`)
+
+Reached from **Admin → System → Backups**. It reports; it never writes.
+
+- **What gets backed up.** The database is captured daily and is small.
+  Deliverables are **off by default** — they are large and can usually be
+  regenerated from CAD — and when switched on the page shows how often they are
+  copied, roughly what a copy costs, and where it is written.
+- **Room left** on the disk holding the backups.
+- **What you have**, newest first, each marked *Database + files* or *Database
+  only*, and flagged **looks empty** if the database archive is too small to
+  contain anything.
+
+Restoring a backup, and changing what gets captured, are host actions performed
+at a terminal. The page shows the exact commands. There is no button for either:
+the application has no privileged access to the host, which is what keeps a
+problem in the web app from becoming a problem with the machine.
 
 ## Audit And Metrics
 

@@ -346,11 +346,25 @@ Anything the dashboard has not set is left as it was, which is what lets an
 existing installation keep behaving exactly as it does today. If the settings
 cannot be read at all the backup still runs, on its flags.
 
-**Admin → the backups panel** reports what this adds up to: what each backup
-holds (database only, or database + files), where the files went, what a copy
-costs, and how much room is left. It is read-only — there is no button that can
-start or destroy a backup, because the app has no privilege to do either and
-giving it that privilege is a bad trade.
+### The Backups page
+
+**Admin → System → Backups** (`/admin/backups`) reports what this adds up to:
+
+- **What gets backed up** — database daily; deliverables either off, or their
+  frequency, roughly what one copy costs, and where it is written. It warns when
+  they would land on the same disk as the files they protect.
+- **Room left** — free space on the filesystem holding the backups, and what the
+  backups occupy, including any archive kept on another drive.
+- **What you have** — every backup, newest first, each marked *Database + files*
+  or *Database only*, with the off-drive location where that applies. An archive
+  too small to contain documents is flagged **looks empty**.
+- The exact `restore-instance.sh` command to copy and paste.
+
+It is **read-only**. There is no button that starts, changes or deletes a
+backup, because the container has a read-only backups mount, no docker socket
+and an unprivileged user — and granting any of those so a button could work
+would turn a problem in the web app into a problem with the whole machine. The
+page needs `system.maintenance` or `system.config.read`.
 
 ### The free-space floor
 

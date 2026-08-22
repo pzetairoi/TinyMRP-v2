@@ -187,6 +187,30 @@ def admin_index():
             backup_summary = None
     return render_template("admin/index.html", backup_summary=backup_summary)
 
+@bp.get("/backups")
+@auth_required()
+def admin_backups():
+    """Report what is being captured, where it goes, and what it costs.
+
+    Read-only on purpose. The backup itself runs on the host: this container has
+    a read-only backups mount, no docker socket and an unprivileged user, and
+    granting any of those to serve a button would turn a web vulnerability into
+    a host compromise.
+    """
+    if not has_any_permission(current_user, ("system.maintenance", "system.config.read")):
+        abort(403)
+    try:
+        from app.services.backups import summary as _backup_summary
+
+        report = _backup_summary(limit=50)
+    except Exception:
+        # This page is what somebody opens when they are worried about backups.
+        # It has to render and say so, not 500.
+        current_app.logger.exception("backups page could not read the backup state")
+        report = {"available": False, "backups": [], "count": 0, "total_bytes": 0}
+    return render_template("admin/backups.html", summary=report)
+
+
 @bp.get("/metrics")
 @require_permission("system.maintenance")
 def admin_metrics():

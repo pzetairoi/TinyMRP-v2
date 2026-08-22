@@ -324,3 +324,16 @@ def test_the_script_default_matches_the_documented_default():
         "contradicts the documented default on any instance with no stored policy"
     )
 
+
+def test_the_backups_page_is_documented_where_people_look():
+    """A page nobody can find is the same as a page that does not exist."""
+    admin_help = (REPO / "docs" / "help" / "06_customization_admin.md").read_text(encoding="utf-8")
+    assert "/admin/backups" in admin_help
+    assert "Admin → System → Backups" in admin_help, (
+        "the help must say how to reach the page, not just that it exists"
+    )
+    nav = (REPO / "app" / "templates" / "security" / "base.html").read_text(encoding="utf-8")
+    assert "admin.admin_backups" in nav, (
+        "the navigation does not link to the backups page"
+    )
+

@@ -1784,6 +1784,7 @@ someone with <code>imports.override_approved</code> to tick “also approved”.
 <li>Roles</li>
 <li>Audit Log</li>
 <li>Metrics</li>
+<li>Backups</li>
 <li>App Settings</li>
 <li>Add-in Admin</li>
 <li>Jobs, Suppliers, Customers, Orders shortcuts</li>
@@ -1942,6 +1943,22 @@ never deleted</strong>: the pack is the only record of what an import contained,
 the disk cost is unchanged and only the working folder gets tidier.</p>
 <p>The sweep runs after an import, at most once a day, so there is nothing to
 schedule or install. Set the retention to <strong>0</strong> to switch it off entirely.</p>
+</div></details><details class="help-section" id="sec-backups-adminbackups"><summary><span class="help-section-title" id="backups-adminbackups">Backups (<code>/admin/backups</code>)</span></summary><div class="help-section-body">
+<p>Reached from <strong>Admin → System → Backups</strong>. It reports; it never writes.</p>
+<ul>
+<li><strong>What gets backed up.</strong> The database is captured daily and is small.
+Deliverables are <strong>off by default</strong> — they are large and can usually be
+regenerated from CAD — and when switched on the page shows how often they are
+copied, roughly what a copy costs, and where it is written.</li>
+<li><strong>Room left</strong> on the disk holding the backups.</li>
+<li><strong>What you have</strong>, newest first, each marked <em>Database + files</em> or <em>Database
+only</em>, and flagged <strong>looks empty</strong> if the database archive is too small to
+contain anything.</li>
+</ul>
+<p>Restoring a backup, and changing what gets captured, are host actions performed
+at a terminal. The page shows the exact commands. There is no button for either:
+the application has no privileged access to the host, which is what keeps a
+problem in the web app from becoming a problem with the machine.</p>
 </div></details><details class="help-section" id="sec-audit-and-metrics"><summary><span class="help-section-title" id="audit-and-metrics">Audit And Metrics</span></summary><div class="help-section-body">
 <h3 id="audit-adminaudit">Audit (<code>/admin/audit/</code>)</h3>
 <ul>
@@ -2139,7 +2156,7 @@ actually accept. Run any of them with <code>--help</code> or <code>Get-Help</cod
 <tr>
 <td><code>backup-instance.sh</code></td>
 <td>TinyMRP — back up one instance (Phase 4).</td>
-<td><code>--dest</code>, <code>--keep-days</code>, <code>--keep-count</code>, <code>--max-total-gb</code>, <code>--no-deliverables</code>, <code>--raw</code>, <code>--dry-run</code></td>
+<td><code>--dest</code>, <code>--keep-days</code>, <code>--keep-count</code>, <code>--keep-full</code>, <code>--keep-db</code>, <code>--max-total-gb</code>, <code>--min-free-gb</code>, <code>--min-free-pct</code>, <code>--deliverables-dest</code>, <code>--deliverables-frequency</code>, <code>--with-deliverables</code>, <code>--no-deliverables</code>, <code>--raw</code>, <code>--dry-run</code></td>
 </tr>
 <tr>
 <td><code>create-instance.sh</code></td>
@@ -2164,7 +2181,7 @@ actually accept. Run any of them with <code>--help</code> or <code>Get-Help</cod
 <tr>
 <td><code>install-backup-job.sh</code></td>
 <td>TinyMRP — install the scheduled backup jobs for all instances.</td>
-<td><code>--time</code>, <code>--keep-days</code>, <code>--keep-count</code>, <code>--max-total-gb</code>, <code>--dest</code>, <code>--no-deliverables</code>, <code>--uninstall</code></td>
+<td><code>--time</code>, <code>--keep-days</code>, <code>--keep-count</code>, <code>--keep-full</code>, <code>--keep-db</code>, <code>--max-total-gb</code>, <code>--min-free-gb</code>, <code>--min-free-pct</code>, <code>--dest</code>, <code>--no-deliverables</code>, <code>--uninstall</code></td>
 </tr>
 <tr>
 <td><code>install-host.sh</code></td>

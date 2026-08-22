@@ -53,12 +53,13 @@
     {% set admin_fields = has_perm('system.config.manage') or has_perm('system.rebuild') %}
     {% set admin_addin = has_perm('system.config.manage') or has_perm('system.storage.manage') or has_perm('numbering.manage') %}
     {% set admin_metrics = has_perm('system.maintenance') %}
+    {% set admin_backups = has_perm('system.maintenance') or has_perm('system.config.read') %}
     {% set admin_purge = has_perm('parts.purge') and has_perm('files.purge') %}
     {% set is_admin = admin_people or admin_audit or admin_config or admin_addin or admin_metrics or admin_purge %}
     {% set admin_active = request_path == '/admin/' or request_path.startswith('/admin/settings') or request_path.startswith('/admin/users') or request_path.startswith('/admin/roles') or request_path.startswith('/admin/audit') or request_path.startswith('/admin/purge-parts') or request_path.startswith('/admin/metrics') or request_path.startswith('/ui/admin/') %}
     {% set admin_access_active = request_path.startswith('/admin/users') or request_path.startswith('/admin/roles') %}
     {% set admin_config_active = request_path.startswith('/admin/settings') or request_path.startswith('/ui/admin/fields') or request_path.startswith('/ui/admin/addin') %}
-    {% set admin_system_active = request_path.startswith('/admin/audit') or request_path.startswith('/admin/metrics') or request_path.startswith('/admin/purge-parts') %}
+    {% set admin_system_active = request_path.startswith('/admin/audit') or request_path.startswith('/admin/metrics') or request_path.startswith('/admin/backups') or request_path.startswith('/admin/purge-parts') %}
     {% set account_active = request_path.startswith('/app') %}
     {% set tokens_active = request_path.startswith('/ui/addin/tokens') %}
     {% set help_active = request_path.startswith('/help') %}
@@ -222,9 +223,14 @@
                   <li><a class="dropdown-item{% if request_endpoint == 'ui.admin_addin_ui' %} active{% endif %}" href="{{ url_for('ui.admin_addin_ui') }}">SolidWorks add-in</a></li>
                   {% endif %}
                   {% endif %}
-                  {% if admin_metrics %}
+                  {% if admin_metrics or admin_backups %}
                   <li><h6 class="dropdown-header tm-nav-section-title">System</h6></li>
+                  {% endif %}
+                  {% if admin_metrics %}
                   <li><a class="dropdown-item{% if request_endpoint == 'admin.admin_metrics' %} active{% endif %}" href="{{ url_for('admin.admin_metrics') }}">System metrics</a></li>
+                  {% endif %}
+                  {% if admin_backups %}
+                  <li><a class="dropdown-item{% if request_endpoint == 'admin.admin_backups' %} active{% endif %}" href="{{ url_for('admin.admin_backups') }}">Backups</a></li>
                   {% endif %}
                 </ul>
               </li>
@@ -335,12 +341,13 @@
             </ul>
           </div>
           {% endif %}
-          {% if admin_metrics or admin_purge %}
+          {% if admin_metrics or admin_backups or admin_purge %}
           <div class="dropdown">
             <button class="tm-admin-bar__link dropdown-toggle{% if admin_system_active %} active{% endif %}" type="button" data-bs-toggle="dropdown" aria-expanded="false">System</button>
             <ul class="dropdown-menu dropdown-menu-end">
               {% if admin_metrics %}<li><a class="dropdown-item" href="{{ url_for('admin.admin_metrics') }}">System metrics</a></li>{% endif %}
-              {% if admin_metrics and admin_purge %}<li><hr class="dropdown-divider"></li>{% endif %}
+              {% if admin_backups %}<li><a class="dropdown-item" href="{{ url_for('admin.admin_backups') }}">Backups</a></li>{% endif %}
+              {% if (admin_metrics or admin_backups) and admin_purge %}<li><hr class="dropdown-divider"></li>{% endif %}
               {% if admin_purge %}<li><a class="dropdown-item text-danger" href="{{ url_for('admin.purge_parts') }}">Purge parts data</a></li>{% endif %}
             </ul>
           </div>
