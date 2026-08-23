@@ -1,7 +1,7 @@
 # What TinyMRP is, and what it is not
 
-Decided by the owner on 2026-08-07. This document exists so that marketing
-copy, sales conversations and the help all describe the same product.
+This document keeps marketing copy, sales conversations and Help aligned around
+the same product scope.
 
 Anyone writing about TinyMRP should be able to check a claim against this page
 in under a minute. If a claim is not supported here, it does not go out.
@@ -77,4 +77,5 @@ domain. Anyone may use, copy, modify and sell it, owing nothing.
 
 This is deliberate, and it has a commercial consequence worth understanding:
 what is sold is never the software. It is hosting, setup, support, and the
-assurance that someone maintains it. See `SERVICE_AND_SUPPORT.md`.
+assurance that someone maintains it. Any service terms are agreed separately
+for the deployment concerned.

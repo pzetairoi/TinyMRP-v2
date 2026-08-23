@@ -13,7 +13,6 @@ depends on the deployment:
 | Linux bare metal | `/etc/tinymrp/.env` | systemd `EnvironmentFile=` |
 | Windows LAN | `C:\TinyMRP\config\.env.lan` | `ENV_FILE` read by the service |
 | VPS multi-instance | `/srv/tinymrp/instances/<name>/.env` | compose `env_file:` |
-| Local development | `.env.dev` (from `.env.dev.example`) | `ENV_FILE=.env.dev python run.py` |
 
 After changing any of these, restart the application. Nothing here is read
 again at runtime — the two exceptions are noted where they occur.
@@ -178,9 +177,6 @@ backups: without them a restored database has no usable sessions.
 **Default:** `mongodb://localhost:27017/tinymrp-v2`
 
 ```bash
-# Local, no auth (development only)
-MONGO_URI=mongodb://127.0.0.1:27017/tinymrp-v2
-
 # Container stack with a scoped application user
 MONGO_URI=mongodb://tinymrp_app:PASSWORD@mongo:27017/tinymrp?authSource=tinymrp
 
@@ -350,8 +346,10 @@ Rate limits are keyed by client address, so they are only meaningful if
 | `TINYMRP_CSP_REPORT_ONLY_STRICT` | `false` | Also emit the stricter policy as report-only, to size the migration before enforcing it. |
 | `TINYMRP_CSP_REPORT_URI` | unset | Where browsers post those reports. |
 
-`upgrade-insecure-requests` is emitted only when the transport is HTTPS. See
-[docs/security/csp_inline_burndown.md](../security/csp_inline_burndown.md).
+`upgrade-insecure-requests` is emitted only when the transport is HTTPS. Have
+CSP changes security-reviewed: overly broad exceptions can weaken browser
+protections, while overly strict rules can prevent application controls from
+loading.
 
 ---
 
@@ -382,17 +380,6 @@ Rate limits are keyed by client address, so they are only meaningful if
 
 Each of these is also editable from **Admin → Settings**, and the stored value
 wins over the environment.
-
----
-
-## Development only
-
-Read by the frontend build, never by the server. Irrelevant to a deployed
-instance.
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `VITE_BACKEND_URL` | `http://localhost:5000` | Backend the Vite dev server proxies to during `npm run dev`. See [09 — Local development](09-local-development.md). |
 
 ---
 

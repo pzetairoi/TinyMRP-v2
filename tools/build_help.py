@@ -20,8 +20,8 @@ REPOSITORY_BLOB_BASE = "https://github.com/pzetairoi/TinyMRP-v2/blob/main"
 REPOSITORY_TREE_BASE = "https://github.com/pzetairoi/TinyMRP-v2/tree/main"
 
 
-# The source files remain ordinary Markdown/text files in the repository.  The
-# builder only publishes a navigable, authenticated view of them; it never
+# Approved source files remain ordinary Markdown in the repository. The
+# builder publishes a navigable, authenticated view of that allowlist; it never
 # creates a second prose source that can drift away from the originals.
 DOCUMENT_GROUPS: Tuple[Dict[str, Any], ...] = (
     {
@@ -36,28 +36,13 @@ DOCUMENT_GROUPS: Tuple[Dict[str, Any], ...] = (
         "description": "Current deployment, configuration, networking, backup and update guidance.",
     },
     {
-        "id": "security-governance",
-        "title": "Security & governance",
-        "description": "Security policy, access intent, dependency triage and risk controls.",
-    },
-    {
-        "id": "product-support",
-        "title": "Product & support",
-        "description": "Product scope, retention, support and disclosure policies.",
-    },
-    {
-        "id": "engineering-reference",
-        "title": "Engineering & reference",
-        "description": "Architecture, field design, testing and generated technical reference.",
+        "id": "product-information",
+        "title": "Product information",
+        "description": "The supported product scope and intended use.",
     },
 )
 
-_ROOT_DOCUMENTS = ("README.md", "SECURITY.md", "CHANGELOG.md")
-_TECHNICAL_HELP_DOCUMENTS = {
-    "docs/help/06b_server_installation.md",
-    "docs/help/08_reference_auto.md",
-    "docs/help/CONTRIBUTING_HELP.md",
-}
+_SERVER_HELP_DOCUMENT = "docs/help/06b_server_installation.md"
 
 
 def _slugify(text: str) -> str:
@@ -86,20 +71,17 @@ def _source_key(path: Path) -> str:
 
 def _document_group(path: Path) -> str:
     rel = _source_key(path)
-    if rel.startswith("docs/help/") and rel not in _TECHNICAL_HELP_DOCUMENTS:
+    if rel.startswith("docs/help/") and rel != _SERVER_HELP_DOCUMENT:
         return "user-guide"
-    if rel.startswith("docs/deployment/") or rel == "docs/help/06b_server_installation.md":
+    if (
+        (rel.startswith("docs/deployment/") and rel != "docs/deployment/09-local-development.md")
+        or rel == "docs/UPDATING_PRODUCTION.md"
+        or rel == _SERVER_HELP_DOCUMENT
+    ):
         return "installation-operations"
-    if rel == "SECURITY.md" or rel.startswith("docs/security/"):
-        return "security-governance"
-    if rel.startswith("docs/commercial/"):
-        return "product-support"
-    if rel == "CHANGELOG.md" or rel.startswith("docs/planning/") or rel in {
-        "docs/PRODUCTION_HARDENING_BASELINE.md",
-        "docs/UPDATING_PRODUCTION.md",
-    }:
-        return "history"
-    return "engineering-reference"
+    if rel == "docs/commercial/PRODUCT_SCOPE.md":
+        return "product-information"
+    return "developer-only"
 
 
 def _source_sort_key(path: Path) -> Tuple[int, str]:
@@ -115,11 +97,14 @@ def _documentation_sources() -> List[Path]:
         for path in DOCS_DIR.rglob("*")
         if path.is_file() and path.suffix.lower() in {".md", ".txt"}
     ]
-    files.extend(REPO_ROOT / name for name in _ROOT_DOCUMENTS if (REPO_ROOT / name).is_file())
-    # Planning archives, changelogs and point-in-time production evidence stay
-    # in the repository for developers. They are deliberately not published in
-    # the end-user Help UI.
-    return sorted((path for path in files if _document_group(path) != "history"), key=_source_sort_key)
+    published_groups = {group["id"] for group in DOCUMENT_GROUPS}
+    # Publishing is deliberately allowlisted. Developer, security and history
+    # files remain in the repository and cannot leak into Help merely because a
+    # new Markdown file was added.
+    return sorted(
+        (path for path in files if _document_group(path) in published_groups),
+        key=_source_sort_key,
+    )
 
 
 def _document_id(path: Path) -> str:

@@ -128,7 +128,7 @@ each participant's restricted view instead of simulating every reply as one
 user.
 
 The corresponding managed-file fixture lives in
-`sample_data/cv03_tr_a01_rev_a`. For an isolated development installation,
+`sample_data/cv03_tr_a01_rev_a`. For an isolated non-production installation,
 copy it into the selected deliverables root with:
 
 ```text

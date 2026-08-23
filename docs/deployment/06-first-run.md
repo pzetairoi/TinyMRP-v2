@@ -69,7 +69,7 @@ needed, grants the `administrator` role, and revokes every existing session and
 API token for that user.
 
 Constraints: 12+ characters (`SECURITY_PASSWORD_LENGTH_MIN`), not equal to the
-email address, and not the historical example password `ChangeMe123!`, which is
+email address, and not the known example password `ChangeMe123!`, which is
 refused outright.
 
 ### The seeding rules

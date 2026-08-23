@@ -87,7 +87,7 @@ that silently break a deployment when they are wrong:
 
 A `Secure` cookie is discarded by the browser on a plain-HTTP origin, so the
 CSRF token minted with the login form is gone by the time the form is posted.
-Measured on a real LAN install with `TINYMRP_URL` wrongly set to `https://`:
+A LAN install with `TINYMRP_URL` incorrectly set to `https://` reports:
 
 ```
 HTTP 400 — "CSRF session token is missing. Retry the action from the original form."
@@ -197,7 +197,7 @@ flask --app run.py user bootstrap-admin --email admin@yourcompany.com
 
 **What are the password rules?**
 12+ characters (`SECURITY_PASSWORD_LENGTH_MIN`), not equal to the email, and
-not the historical example `ChangeMe123!`. The Community installers require 14+
+not the known example `ChangeMe123!`. The Community installers require 14+
 for the first administrator.
 
 **How do I get a dataset to test with?**
@@ -226,9 +226,9 @@ annotated.
 Correct until the user is linked to a customer or supplier record. The portal
 boundary is fail-closed. Link it under **Admin → Customers/Suppliers**.
 
-**Verified behaviour of a scoped demo login** (measured on the sample dataset):
-the `customer_spares` account sees 4 parts out of 70, gets 403 on `/admin/`,
-and cannot see the deliberately unreleased `CV03-F02` revision B.
+**Expected scoped demo behaviour:** the `customer_spares` account sees 4 parts
+out of 70, gets 403 on `/admin/`, and cannot see the deliberately unreleased
+`CV03-F02` revision B.
 
 ---
 

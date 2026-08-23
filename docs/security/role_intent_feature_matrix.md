@@ -2,8 +2,9 @@
 
 Route guards and `app.services.authorization` are authoritative. Standard roles
 are additive: combinations receive the union of their permissions and scopes.
-The old exact `admin` slug remains a temporary compatibility bypass, but it is
-not a recommended standard role. No role is assigned automatically.
+The old exact `admin` slug may remain in upgraded databases as an ordinary
+custom role, but its name grants no permissions. It is not a standard role. No
+role is assigned automatically.
 
 Ten roles cover the intended organisation. Superseded slugs
 (`system_administrator`, `engineering_data_steward`, `import_operator`,

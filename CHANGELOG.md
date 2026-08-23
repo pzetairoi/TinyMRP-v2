@@ -74,8 +74,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
   revision, a change request against approved parts, a BOM-only re-import, a
   restructure, a messy export, and the blank-approval-column trap.
 
-Other work planned for after 1.0.0 is tracked in
-`docs/planning/productionmaturityplan.txt`.
+Subsequent work is recorded in this changelog and the corresponding commits.
 
 ## [1.0.0] — 2026-08-08
 

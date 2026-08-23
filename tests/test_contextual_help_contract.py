@@ -19,23 +19,18 @@ def _help_map() -> dict:
     return json.loads((HELP_DIR / "context_help.json").read_text(encoding="utf-8"))
 
 
-def test_every_canonical_document_is_in_the_help_library_once():
-    all_docs = {
+def test_only_approved_user_and_operator_sources_are_in_help():
+    expected = {
         path.relative_to(REPO_ROOT).as_posix()
-        for path in (REPO_ROOT / "docs").rglob("*")
-        if path.is_file() and path.suffix.lower() in {".md", ".txt"}
+        for path in (REPO_ROOT / "docs" / "help").glob("*.md")
     }
-    developer_history = {
-        source
-        for source in all_docs
-        if source.startswith("docs/planning/")
-        or source in {
-            "docs/PRODUCTION_HARDENING_BASELINE.md",
-            "docs/UPDATING_PRODUCTION.md",
-        }
-    }
-    developer_history.add("CHANGELOG.md")
-    expected = (all_docs - developer_history) | {"README.md", "SECURITY.md"}
+    expected.update(
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in (REPO_ROOT / "docs" / "deployment").glob("*.md")
+        if path.name != "09-local-development.md"
+    )
+    expected.add("docs/UPDATING_PRODUCTION.md")
+    expected.add("docs/commercial/PRODUCT_SCOPE.md")
 
     toc = _toc()
     published = [
@@ -48,13 +43,33 @@ def test_every_canonical_document_is_in_the_help_library_once():
     assert toc["source_count"] == len(expected)
     assert set(published) == expected
     assert len(set(published)) == toc["source_count"]
-    assert developer_history.isdisjoint(published), "developer history leaked into end-user Help"
+    assert not any(
+        source.startswith(("docs/development/", "docs/history/", "docs/security/"))
+        for source in published
+    )
+    assert "docs/deployment/09-local-development.md" not in published
 
 
-def test_help_library_has_one_default_and_hides_developer_history():
+def test_help_library_has_one_default_and_no_developer_sections():
     groups = _toc()["items"]
     assert [group["id"] for group in groups if group.get("default")] == ["user-guide"]
-    assert "history" not in {group["id"] for group in groups}
+    assert [group["id"] for group in groups] == [
+        "user-guide",
+        "installation-operations",
+        "product-information",
+    ]
+
+
+def test_published_help_does_not_link_to_repository_only_documentation():
+    help_html = (HELP_DIR / "help.html").read_text(encoding="utf-8")
+    for repository_only in (
+        "docs/development/",
+        "docs/history/",
+        "docs/security/",
+        "docs/planning/",
+        "docs/deployment/09-local-development.md",
+    ):
+        assert repository_only not in help_html
 
 
 def test_contextual_help_targets_exist_in_the_generated_help():

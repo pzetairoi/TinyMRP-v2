@@ -67,10 +67,9 @@ bearer substitution. CORS is disabled unless an origin is explicitly allowed,
 cookies are Secure + SameSite=Strict, and startup fails if secrets are missing
 or weak.
 
-A second "compat" profile used to exist for local HTTP and staged upgrades. It
-relaxed CORS and CSRF and could generate and persist its own secrets. It was
-removed after 1.0.0: an application that invents its own signing key cannot
-tell a forged session from a real one after a restart.
+There is no relaxed compatibility profile. Local HTTP uses the same
+authentication model with an explicit local origin and operator-supplied
+secrets; the application never invents a signing key.
 
 See `SECURITY.md` for the full threat model and
 `docs/security/supply_chain_policy.md` for immutable pin updates and
@@ -101,14 +100,16 @@ API endpoints:
 
 ## Help System
 
-- Repository Markdown and text files are the single documentation source. The
-  `/help` UI builds them into labelled user, operations, security, product,
-  and engineering sections; day-to-day user guidance is the default. Developer
-  history and evidence remain repository-only.
+- Repository Markdown files are the single documentation source. The `/help`
+  UI publishes an explicit allowlist of user guidance, installation/operations
+  material and approved product information; day-to-day user guidance is the
+  default. Developer, security and history material remains repository-only.
 - Generate the static help page with: `flask help build`.
 - The output is written to `app/static/help/help.html` and `app/static/help/help_toc.json`.
 - Contextual `?` links use `app/static/help/context_help.json` to connect each
   authenticated UI area to its applicable user-guide section.
+- Maintainer guidance lives in [`docs/development/`](docs/development/), and
+  concise evidence routing lives in [`docs/history/`](docs/history/).
 - Commit the generated files so `/help` is always up to date.
 
 ## SolidWorks Add-in
@@ -220,7 +221,8 @@ when you intentionally want to restore the canonical definitions.
 The exact permission intent is documented in
 `docs/security/role_intent_feature_matrix.md`. Roles can be managed by authorised
 administrators in `/admin/roles`. The legacy `admin` slug remains recognised for
-existing installations but is not created for new users.
+existing installations only as an ordinary custom role; its name grants no
+permissions and it is not created for new users.
 
 ### Row-level scoping for external users
 
@@ -249,7 +251,7 @@ Optional override (not recommended in production):
 
 ## Quick Start (local dev)
 
-PowerShell snippet (from `docs/planning/handycommands.txt`):
+PowerShell development example:
 
 ```powershell
 # 1) (optional) Run nginx in front of Flask for protected file offload
@@ -441,7 +443,7 @@ docker compose --env-file C:\CADEXPORT\.tinymrp\compose.env -f C:\TinyMRP\Server
 
 Use the same `docker compose exec ...` pattern to run `user set-password`, `grant-role`, or `revoke-role`.
 
-Useful snippets (from `docs/planning/handycommands.txt`):
+Useful administration commands:
 
 ```bash
 docker compose up -d
@@ -592,5 +594,5 @@ Data helpers (see `app/cli.py`):
 publish, use, compile, sell or distribute it, commercially or not, by any
 means. There is no warranty of any kind.
 
-What that means in practice, and how paid support relates to it, is in
-[docs/commercial/SERVICE_AND_SUPPORT.md](docs/commercial/SERVICE_AND_SUPPORT.md).
+Operational support terms are deployment-specific and are not defined by this
+repository's public-domain software licence.

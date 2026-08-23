@@ -806,9 +806,9 @@ docker compose --env-file .env -f compose.yaml logs --tail 100 app
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | Login succeeds then returns to the login page | `TINYMRP_URL` scheme does not match how you are reaching the site | `./tinymrp.sh reconfigure`; background in [07 — Troubleshooting](07-troubleshooting.md#i-log-in-and-land-back-on-the-login-page) |
-| `No such image: mongo:6.0@sha256:...` | Installers before 2026-08-18 passed `--pull never` after `--build`, which blocked Mongo, Redis and Caddy from being pulled too | `git pull` and re-run. On an older checkout: `docker compose --env-file .env -f compose.yaml --profile domain pull mongo redis caddy` first |
-| `exec /usr/bin/caddy: operation not permitted` | Compose files before 2026-08-18 dropped every capability from Caddy, including the `cap_net_bind_service` its binary carries | `git pull` and re-run. Domain mode cannot start without it |
-| Installer says "ready" but `https://<domain>` never answers | Same Caddy fault: it had no healthcheck, so `--wait` accepted a crash-looping container | `./tinymrp.sh status` — Caddy must say `healthy`, not `Restarting` |
+| `No such image: mongo:6.0@sha256:...` | A required service image is unavailable locally | `git pull` and re-run. If image pulling was disabled, run `docker compose --env-file .env -f compose.yaml --profile domain pull mongo redis caddy` first |
+| `exec /usr/bin/caddy: operation not permitted` | Caddy cannot use its required low-port binding capability | `git pull` and re-run with the supported Compose file |
+| Installer says "ready" but `https://<domain>` never answers | Caddy is unhealthy or restarting | `./tinymrp.sh status` — Caddy must say `healthy`, not `Restarting` |
 | Browser warns "your connection is not private" | Internal-only domain, so Caddy signed it itself | [Trusting an internal certificate](#trusting-an-internal-certificate) |
 | `WARNING: ... is not owned by uid 1000 and is not empty` | Existing deliverables folder | `sudo chown -R 1000:1000 /srv/tinymrp/deliverables` |
 | `ERROR: deliverables root ... is NOT writable` | Same, or a read-only mount | As above; check the mount options |

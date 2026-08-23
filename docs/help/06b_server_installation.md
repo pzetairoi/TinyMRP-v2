@@ -20,7 +20,6 @@ certainly **`docs/deployment/01-vm-docker.md`**.
 | A Windows machine on an office LAN | `docs/deployment/03-windows-lan.md` |
 | A locked-down Windows host where only `python run.py` is approved | `docs/deployment/12-restricted-windows-flask.md` |
 | A public VPS hosting several companies | `docs/deployment/04-vps-multi-instance.md` |
-| A developer machine | `docs/deployment/09-local-development.md` |
 
 Each guide is self-contained: prerequisites, the install command, what every
 question means, first login, day-to-day operation, and the failures specific to

@@ -374,9 +374,9 @@ the real budget is the configured one times the worker count. Point
 
 ### High idle CPU
 
-Historically the Mongo healthcheck: `mongosh` is a full Node REPL, roughly
-1.9 s of CPU per invocation. The interval is 30 s in the shipped configs. If
-you have a hand-written compose file with a 10 s interval, raise it.
+`mongosh` is a full Node REPL and can use roughly 1.9 seconds of CPU per health
+check. The supported configurations use a 30-second interval. Raise shorter
+intervals in custom Compose files.
 
 ### Slow first search after every restart
 

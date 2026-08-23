@@ -1,4 +1,4 @@
-"""Switchable per-request profiler (docs/planning/optimizationplan.txt section 2).
+"""Switchable per-request database-operation profiler.
 
 Reports how MANY database operations a request performs, not how slow each one
 is. That distinction is the whole point here: every query in this application

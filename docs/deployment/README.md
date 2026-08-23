@@ -27,7 +27,6 @@ You are never asked to invent a secret.
 | A Windows machine on an office LAN | Waitress service + nginx, or Docker Desktop | [03 — Windows LAN](03-windows-lan.md) |
 | A locked-down Windows host where only `python run.py` is approved | `run.py` + waitress, no service, no elevation | [12 — Windows restricted](12-restricted-windows-flask.md) |
 | A public VPS hosting several companies | Guided Caddy multi-instance with automatic HTTPS | [04 — VPS, multiple instances](04-vps-multi-instance.md) |
-| A developer machine | `python run.py` against local MongoDB | [09 — Local development](09-local-development.md) |
 
 ## One script per variant
 

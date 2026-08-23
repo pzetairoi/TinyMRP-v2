@@ -2,7 +2,10 @@
 
 ## Reporting
 
-If you discover a security issue, please contact the project owner privately. Provide:
+Please report vulnerabilities privately through
+[GitHub Security Advisories](https://github.com/pzetairoi/TinyMRP-v2/security/advisories/new).
+Do not open a public issue before the report has been assessed. Include:
+
 - A clear description of the issue and impact.
 - Steps to reproduce.
 - Any proposed fix or mitigation.
@@ -43,7 +46,7 @@ One model, no alternatives:
 - Cookies are Secure + SameSite=Strict.
 - Startup fails if secrets are missing/weak.
 
-## Phase 1 Controls (rate limits, token expiry, 2FA, logging)
+## Operational controls
 
 - **Rate limiting** — on by default. Login and password endpoints: `RATE_LIMIT_LOGIN`
   (default `10 per minute;100 per hour`). Optional global API budget: `RATE_LIMIT_API`.

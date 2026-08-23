@@ -50,8 +50,8 @@ def test_help_page_renders_collapsible_sections(client, app, user):
     assert "Help &amp; documentation" in body
 
 
-def test_help_keeps_user_guidance_first_and_labels_the_full_library(client, app, user):
-    """Technical material is reachable without crowding the default landing view."""
+def test_help_keeps_user_guidance_first_and_excludes_developer_material(client, app, user):
+    """Operator references are reachable without publishing developer records."""
 
     _admin(user)
     _login(client, user)
@@ -62,12 +62,18 @@ def test_help_keeps_user_guidance_first_and_labels_the_full_library(client, app,
     assert '<option value="all">All available documentation</option>' in body
     for section in (
         "Installation &amp; operations",
-        "Security &amp; governance",
-        "Product &amp; support",
-        "Engineering &amp; reference",
+        "Product information",
     ):
         assert section in body
-    assert "History &amp; evidence" not in body
+    for developer_only in (
+        "History &amp; evidence",
+        "Engineering &amp; reference",
+        "Security &amp; governance",
+        "Security risk-acceptance template",
+    ):
+        assert developer_only not in body
+
+    assert 'data-help-source="docs/deployment/09-local-development.md"' not in body
 
 
 def test_help_covers_the_features_users_ask_about(client, app, user):

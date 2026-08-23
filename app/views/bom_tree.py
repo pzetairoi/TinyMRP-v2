@@ -226,8 +226,7 @@ def _authorised_child_pairs(user, parent_pn: str, parent_rev: str) -> set[tuple[
     descendant to answer a question about one level: 1342 parts and ~6 seconds
     for a 2034-node assembly, paid again on every expansion.
 
-    SECURITY CHANGE, made deliberately (see docs/planning/hardeningplan.txt, 2026-08-06):
-    an unauthorised child is now HIDDEN rather than causing the entire tree to
+    An unauthorised child is HIDDEN rather than causing the entire tree to
     be refused. A user with partial access sees their own branches instead of
     an empty tree. What must still hold - and what the tests pin - is that no
     unauthorised part is ever returned; only the blast radius of a denial

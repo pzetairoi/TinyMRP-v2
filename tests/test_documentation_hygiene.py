@@ -139,10 +139,23 @@ def test_a_secondary_readme_does_not_restate_a_whole_install():
         )
 
 
-def test_the_planning_archive_says_it_is_not_instructions():
-    """5,900 lines of completed plans with no marker read as current guidance."""
-    index = REPO_ROOT / "docs/planning/README.md"
-    assert index.is_file(), "docs/planning has no README saying what it is"
+def test_history_is_curated_instead_of_shipping_completed_work_logs():
+    planning_dir = REPO_ROOT / "docs/planning"
+    assert not planning_dir.exists() or not any(planning_dir.iterdir())
+    index = REPO_ROOT / "docs/history/README.md"
+    assert index.is_file(), "docs/history has no concise evidence index"
     text = index.read_text(encoding="utf-8").lower()
-    assert "not" in text and ("historical" in text or "history" in text)
-    assert "docs/deployment" in text, "the archive does not redirect to the current guides"
+    assert "not published in end-user help" in text
+    assert "changelog" in text and "deployment/10-operations" in text
+
+
+def test_unfinished_commercial_and_point_in_time_audit_drafts_are_not_shipped():
+    removed = (
+        "docs/PRODUCTION_HARDENING_BASELINE.md",
+        "docs/commercial/RETENTION_AND_DELETION.md",
+        "docs/commercial/SECURITY_DISCLOSURE.md",
+        "docs/commercial/SERVICE_AND_SUPPORT.md",
+        "docs/security/csp_inline_burndown.md",
+        "docs/security/dependency_advisory_triage.md",
+    )
+    assert not [path for path in removed if (REPO_ROOT / path).exists()]

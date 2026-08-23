@@ -1,81 +1,55 @@
-# Supply-chain pin and release-gate policy
+# Supply-chain and release policy
 
-This policy covers TinyMRP's production Docker image, supported Compose and
-guided VPS/Caddy deployments, GitHub Actions, dependency audits, SBOMs, image
-scanning, and repository secret scanning.
+This maintainer policy covers production images, supported Compose variants,
+deployment renderers, GitHub Actions, dependency audits, SBOMs, image scanning
+and repository secret scanning. It is not end-user Help.
 
-## Immutable defaults
+## Immutable, reviewable inputs
 
-The Dockerfile pins its BuildKit frontend, Node build stage, and Python runtime
-stage to multi-architecture manifest digests. Main Compose, Windows one-folder,
-guided VPS/Caddy, restore verification, and Nextcloud renderers pin Mongo,
-Nginx, Caddy, MariaDB, and Nextcloud in the same way. Every third-party GitHub
-Action uses a verified 40-character commit SHA with its release version in a
-comment. CI uses Ubuntu 24.04, Python 3.11.15, pip 26.2, Node 24.18.1,
-ShellCheck v0.11.0 by image digest, Trivy v0.72.0, and Syft v1.50.0 explicitly.
+- Production and service images use reviewed `tag@sha256:digest` references.
+- Third-party GitHub Actions use reviewed commit SHAs.
+- Python runtime requirements are paired with a hash-locked requirements file;
+  npm uses its committed lockfile and integrity hashes.
+- Release evidence identifies the source commit, image digest and scan date.
 
-Tags remain alongside digests for operator readability and Dependabot context;
-the digest determines the content that runs. Do not replace `tag@sha256:...`
-with a tag alone.
+Do not replace a digest/SHA with a floating tag. Tags may remain beside digests
+for readability; the immutable identifier decides what runs.
 
-## Updating a pin
+## Updating a dependency or pin
 
-Review pins monthly, before every release, and immediately for an applicable
-high/critical advisory.
+1. Resolve the proposed version from the official registry/repository and read
+   its release notes and applicable advisories.
+2. For images, record the multi-architecture manifest digest. For Actions,
+   record the reviewed commit SHA.
+3. Update every protected reference and its contract test. Regenerate the
+   Python or npm lockfile when its direct inputs change.
+4. Run the relevant unit, integration, deployment-rendering and supply-chain
+   contract tests.
+5. Build the production image with current bases, run the complete application
+   suite, scan the image and exercise health/readiness against a disposable
+   stack.
+6. Record old/new versions, immutable identifiers, verification commands and
+   rollback target in the change/release record.
 
-1. Resolve the proposed tag from the official registry or repository. For a
-   Docker image, record the multi-architecture manifest digest, not an
-   architecture-specific child digest. For an Action, resolve and review the
-   tag's peeled commit.
-2. Review upstream release notes and applicable advisories. Never accept a
-   digest change whose tag or source revision was not independently verified.
-3. Update every protected reference and its source contract. Dockerfile pins
-   live in `docker/app/Dockerfile`; static deployment pins live in both Compose
-   files; guided Caddy/Mongo/Nextcloud pins live in
-   `deploy/scripts/lib/common.sh`, `deploy/scripts/lib/nextcloud.sh`, and the
-   restore verifier.
-4. Run `tests/test_supply_chain_contract.py`, bootstrap and six VPS/Caddy
-   contracts, actionlint, Bash syntax, ShellCheck, both static Compose configs,
-   rendered guided and Nextcloud Compose, and rendered Caddy validation.
-5. Build the production image with `--pull`, run the complete backend suite,
-   scan the final image with the pinned Trivy version, and exercise a disposable
-   Mongo → TinyMRP → Caddy health request.
-6. Record the old/new tag, digest/SHA, verification date, commands, test counts,
-   scan disposition, and rollback commit in `docs/planning/hardeningplan.txt` and the release
-   notes. Commit pin updates separately from feature work.
+Emergency image overrides must also use reviewed immutable references, be
+recorded with the change, and be folded back into source promptly.
 
-The Compose/rendering defaults support controlled emergency overrides through
-`TINYMRP_MONGO_IMAGE`, `TINYMRP_NGINX_IMAGE`, `TINYMRP_CADDY_IMAGE`,
-`TINYMRP_MARIADB_IMAGE`, and `TINYMRP_NEXTCLOUD_IMAGE`. An override must itself
-use a reviewed `tag@sha256:digest`, be recorded in the change ticket, and be
-folded back into source immediately after validation. The normal guided
-VPS/Caddy path must not be replaced or bypassed.
+## Blocking gates and evidence
 
-## Evidence and blocking behavior
+CI retains dependency-audit JSON, backend/frontend/image SBOMs, image-scan
+output and secret-scan results. Runtime dependency, image and full-history
+secret checks are blocking according to the workflow configuration.
 
-CI retains these artifacts for 30 days even when the matching gate fails:
+A vulnerability exception requires the record defined in
+[`risk_acceptance_template.md`](risk_acceptance_template.md). An exception does
+not alter a CI gate until the authorised configuration and its narrow contract
+test are reviewed together.
 
-- `backend-supply-chain`: `pip-audit.json` and backend CycloneDX SBOM;
-- `frontend-supply-chain`: `npm-audit.json` and frontend lockfile CycloneDX SBOM;
-- `image-supply-chain`: `trivy-image.json` and final-image CycloneDX SBOM.
+## Verification scope
 
-Python, frontend, image, and full-history secret checks are blocking. The image
-must have no fixed HIGH/CRITICAL findings. Proposed vulnerability exceptions do
-not change CI until a named human risk owner records acceptance, date, maximum
-90-day expiry, compensating controls, and voiding conditions.
+Pin updates must cover static Compose files, generated deployment variants,
+restore verification and relevant install/update scripts. A green application
+test alone is not evidence that a deployment or supply-chain change is safe.
 
-Gitleaks extends the upstream default rules and checks full history. Its only
-ignored fingerprint is a verified non-secret test fixture that has been
-replaced; a regression prevents broader ignores. Two findings in a deleted
-`.env.example` revision remain unsuppressed and release-blocking until an owner
-classifies them and confirms rotation if they were ever usable credentials.
-
-## Residual reproducibility limits
-
-Runtime and CI package versions are exact, npm uses lockfile integrity hashes,
-and the final image contains no pip/setuptools/wheel toolchain. Python source
-artifacts are not yet installed under `pip --require-hashes`; `SUPPLY-LOCK-01`
-tracks that remaining provenance control. GitHub-hosted runner internals and
-external vulnerability databases are also time-varying evidence inputs, so
-release records must retain the workflow run, SBOMs, audit JSON, image digest,
-and scan date.
+Current commands and exact tool versions live in the workflows and lockfiles;
+those executable sources are authoritative over prose.

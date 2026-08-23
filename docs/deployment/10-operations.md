@@ -252,11 +252,9 @@ weekly job has been failing for a month, that stale copy is the only copy of the
 deliverables, and its birthday is the worst possible moment to delete it.
 
 Full and database-only backups are counted **separately** because they differ by
-three orders of magnitude — roughly 2 GB against 2 MB. They used to share one
-ceiling, which meant a single full backup could evict a month of cheap daily
-restore points, or a run of daily ones could evict the only copy of the
-deliverables. A backup counts as *full* if it contains `deliverables.tar.gz`;
-nothing about the folder layout changed, so restore and rollback are unaffected.
+three orders of magnitude — roughly 2 GB against 2 MB. Separate limits retain
+useful daily database restore points without displacing the latest deliverables
+copy. A backup counts as *full* if it contains `deliverables.tar.gz`.
 
 ### What gets backed up
 

@@ -304,16 +304,8 @@ def preflight_export_plan(
                 parts_in_scope[key] = doc
 
     for file_record in files:
-        # REVERTED 2026-08-08. I removed this per-file check arguing it could
-        # not fail - authorised_part_pairs proves the whole pair set above, and
-        # _files_for_pairs only returns files for those pairs. The argument was
-        # wrong, and test_docpack_preflight_rejects_unsafe_required_file caught
-        # it: a PartFile carrying rel_path "../outside.pdf" was accepted where
-        # it had been refused with a 403.
-        #
-        # Keep the full check. The 5592 part queries it costs on a large
-        # assembly are recorded in docs/planning/optimizationplan.txt as still open; the
-        # answer is to make the check cheap, not to reason it away.
+        # Keep the per-file check even after pair-level authorisation: it also
+        # rejects unsafe file paths. Optimisation must preserve that invariant.
         if not managed_file_read_allowed(
             user, file_record, parts_in_scope=parts_in_scope
         ):
