@@ -82,3 +82,7 @@ testfiles/import_scenarios/
 # Community TLS material: never commit a private key.
 deploy/community/certs/*
 !deploy/community/certs/.gitkeep
+
+# Marketing collateral — working material, large binaries, kept out of the
+# repository deliberately. See marketing/README.md.
+/marketing/
