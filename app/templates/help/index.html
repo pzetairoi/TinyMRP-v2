@@ -5,7 +5,7 @@
 
 {% block extra_head %}
 <style>
-  .help-layout { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 1.5rem; }
+  .help-layout { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 1.5rem; }
   @media (max-width: 991px) { .help-layout { grid-template-columns: minmax(0, 1fr); } }
 
   /* Bootstrap's offcanvas-lg becomes a plain static block at >=992px and a
@@ -20,6 +20,9 @@
 
   .help-nav a { display: block; padding: .3rem .55rem; border-radius: .35rem; color: inherit; text-decoration: none; font-size: .87rem; line-height: 1.4; }
   .help-nav a:hover { background: rgba(13,110,253,.08); }
+  .help-nav-group { margin-bottom: .85rem; }
+  .help-nav-group-title { color: #495057; font-size: .76rem; font-weight: 700; letter-spacing: .04em; margin: 0 0 .25rem; text-transform: uppercase; }
+  .help-nav-group-description { color: #6c757d; font-size: .76rem; line-height: 1.35; margin: -.05rem .4rem .35rem; }
   .help-nav-chapter { border-radius: .4rem; margin-bottom: .15rem; }
   .help-nav-chapter > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: .4rem; padding: .3rem .4rem; border-radius: .4rem; }
   .help-nav-chapter > summary:hover { background: rgba(13,110,253,.06); }
@@ -32,9 +35,17 @@
   .help-nav-section { color: #6c757d; border-left: 2px solid transparent; margin-left: -2px; }
   .help-nav-section.active { background: rgba(13,110,253,.12); color: #0d6efd; font-weight: 600; border-left-color: #0d6efd; }
   .help-nav-hidden { display: none !important; }
+  .help-scope-hidden { display: none !important; }
 
   .help-crumb { font-size: .82rem; color: #6c757d; margin-bottom: .6rem; min-height: 1.1rem; }
   .help-crumb strong { color: #495057; }
+
+  .help-group-header { border-bottom: 1px solid #dee2e6; margin-bottom: 1.25rem; padding-bottom: .7rem; }
+  .help-group-header h2 { align-items: center; display: flex; font-size: 1.25rem; font-weight: 700; margin-bottom: .2rem; }
+  .help-group-header p { color: #6c757d; margin: 0; }
+  .help-document { margin-bottom: 2rem; }
+  .help-source { color: #6c757d; font-size: .75rem; margin-bottom: .35rem; }
+  .help-source a { color: inherit; overflow-wrap: anywhere; }
 
   /* One chapter = one h1 with its folded sections underneath. */
   .help-chapter { margin-bottom: 2.25rem; }
@@ -72,14 +83,15 @@
   .help-searching .help-section.help-hit { display: block; }
 
   @media print {
-    .help-nav, .help-nav-toggle, .help-toolbar { display: none; }
+    .help-nav, .help-nav-toggle, .help-toolbar, .help-source { display: none; }
+    .help-scope-hidden { display: block !important; }
     .help-section-body { display: block !important; }
   }
 </style>
 {% endblock %}
 
 {% block content %}
-{% call page_header("Help", "How TinyMRP works, screen by screen.", "Help") %}
+{% call page_header("Help & documentation", "User guidance first, with the complete technical library when you need it.", "Help") %}
   {% if toc_meta.generated_at %}
   <div class="tm-helper-text text-end small">
     <div>Updated {{ toc_meta.generated_at }}</div>
@@ -104,8 +116,12 @@
     <div class="offcanvas-body">
       <div class="fw-semibold small text-uppercase text-muted mb-2 d-none d-lg-block">Contents</div>
       <nav aria-label="Help contents">
-        {% for chapter in toc_items %}
-        <details class="help-nav-chapter" data-chapter-id="{{ chapter.id }}">
+        {% for group in toc_items %}
+        <section class="help-nav-group" data-help-group="{{ group.id }}" aria-labelledby="help-nav-group-{{ group.id }}">
+          <h3 class="help-nav-group-title" id="help-nav-group-{{ group.id }}">{{ group.title }}</h3>
+          <p class="help-nav-group-description">{{ group.description }}</p>
+          {% for chapter in group.chapters %}
+          <details class="help-nav-chapter" data-chapter-id="{{ chapter.id }}">
           {# The title is deliberately NOT a link: an <a href> nested inside a
              <summary> fires its own navigation default action alongside the
              <details> toggle default action on the same click, and browsers'
@@ -118,7 +134,9 @@
             <a class="help-nav-section" href="#{{ section.id }}">{{ section.title }}</a>
             {% endfor %}
           </div>
-        </details>
+          </details>
+          {% endfor %}
+        </section>
         {% endfor %}
       </nav>
     </div>
@@ -130,19 +148,27 @@
               data-bs-toggle="offcanvas" data-bs-target="#helpNavPanel" aria-controls="helpNavPanel">
         <span aria-hidden="true">&#9776;</span> Contents
       </button>
+      <select id="helpScope" class="form-select form-select-sm" style="max-width: 250px" aria-label="Documentation section">
+        {% for group in toc_items %}
+        <option value="{{ group.id }}"{% if group.default %} selected{% endif %}>{{ group.title }}</option>
+        {% endfor %}
+        <option value="all">All available documentation</option>
+      </select>
       <select id="helpJump" class="form-select form-select-sm" style="max-width: 260px" aria-label="Jump to a chapter or section">
         <option value="">Jump to…</option>
-        {% for chapter in toc_items %}
-        <optgroup label="{{ chapter.title }}">
-          <option value="{{ chapter.id }}">{{ chapter.title }}</option>
-          {% for section in chapter.sections %}
-          <option value="{{ section.id }}">&nbsp;&nbsp;{{ section.title }}</option>
+        {% for group in toc_items %}
+          {% for chapter in group.chapters %}
+          <optgroup label="{{ group.title }} — {{ chapter.title }}" data-help-group="{{ group.id }}">
+            <option value="{{ chapter.id }}">{{ chapter.title }}</option>
+            {% for section in chapter.sections %}
+            <option value="{{ section.id }}">&nbsp;&nbsp;{{ section.title }}</option>
+            {% endfor %}
+          </optgroup>
           {% endfor %}
-        </optgroup>
         {% endfor %}
       </select>
       <input id="helpSearch" class="form-control form-control-sm" style="max-width: 260px"
-             placeholder="Search the help..." type="search" aria-label="Search help" />
+             placeholder="Search this section..." type="search" aria-label="Search help and documentation" />
       <button id="helpExpand" class="btn btn-sm btn-outline-secondary">Expand all</button>
       <button id="helpCollapse" class="btn btn-sm btn-outline-secondary">Collapse all</button>
       <span id="helpCount" class="small text-muted ms-auto" aria-live="polite"></span>
@@ -165,14 +191,28 @@
     var search = document.getElementById('helpSearch');
     var count = document.getElementById('helpCount');
     var jump = document.getElementById('helpJump');
+    var scope = document.getElementById('helpScope');
     var crumb = document.getElementById('helpCrumb');
     var sections = Array.prototype.slice.call(content.querySelectorAll('.help-section'));
     var chapters = Array.prototype.slice.call(content.querySelectorAll('.help-chapter'));
+    var groups = Array.prototype.slice.call(content.querySelectorAll('.help-group'));
+    var navGroups = Array.prototype.slice.call(document.querySelectorAll('.help-nav-group'));
     var navChapters = Array.prototype.slice.call(document.querySelectorAll('.help-nav-chapter'));
     var navSections = Array.prototype.slice.call(document.querySelectorAll('.help-nav-section'));
+    var jumpGroups = Array.prototype.slice.call(jump.querySelectorAll('optgroup[data-help-group]'));
+    var selectedScope = 'user-guide';
+
+    function groupIdFor(element) {
+      var owner = element && element.closest ? element.closest('[data-help-group]') : null;
+      return owner ? owner.getAttribute('data-help-group') : '';
+    }
+
+    function isInScope(element) {
+      return selectedScope === 'all' || groupIdFor(element) === selectedScope;
+    }
 
     function setAll(open) {
-      sections.forEach(function (s) { s.open = open; });
+      sections.forEach(function (s) { if (isInScope(s)) s.open = open; });
     }
     var expand = document.getElementById('helpExpand');
     var collapse = document.getElementById('helpCollapse');
@@ -194,7 +234,8 @@
         });
         navSections.forEach(function (a) { a.classList.remove('help-nav-hidden'); });
         setAll(false);
-        if (sections.length) sections[0].open = true;
+        var firstVisibleSection = sections.find(isInScope);
+        if (firstVisibleSection) firstVisibleSection.open = true;
         if (count) count.textContent = '';
         return;
       }
@@ -203,7 +244,7 @@
       var matchedIds = {};
       chapters.forEach(function (c) { c.classList.remove('help-hit'); });
       sections.forEach(function (s) {
-        var match = (s.textContent || '').toLowerCase().indexOf(q) !== -1;
+        var match = isInScope(s) && (s.textContent || '').toLowerCase().indexOf(q) !== -1;
         s.classList.toggle('help-hit', match);
         s.open = match;
         if (match) {
@@ -229,15 +270,47 @@
     }
     if (search) search.addEventListener('input', filter);
 
+    function applyScope(nextScope, updateAddress) {
+      var valid = nextScope === 'all' || groups.some(function (group) {
+        return group.getAttribute('data-help-group') === nextScope;
+      });
+      selectedScope = valid ? nextScope : 'user-guide';
+      if (scope) scope.value = selectedScope;
+      groups.forEach(function (group) {
+        group.classList.toggle('help-scope-hidden', selectedScope !== 'all' && group.getAttribute('data-help-group') !== selectedScope);
+      });
+      navGroups.forEach(function (group) {
+        group.classList.toggle('help-scope-hidden', selectedScope !== 'all' && group.getAttribute('data-help-group') !== selectedScope);
+      });
+      jumpGroups.forEach(function (group) {
+        var hidden = selectedScope !== 'all' && group.getAttribute('data-help-group') !== selectedScope;
+        group.hidden = hidden;
+        group.disabled = hidden;
+      });
+      if (search) search.placeholder = selectedScope === 'all' ? 'Search all documentation...' : 'Search this section...';
+      if (updateAddress && window.history && window.history.replaceState) {
+        var url = new URL(window.location.href);
+        if (selectedScope === 'user-guide') url.searchParams.delete('scope');
+        else url.searchParams.set('scope', selectedScope);
+        window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+      }
+      filter();
+    }
+    if (scope) scope.addEventListener('change', function () { applyScope(scope.value, true); });
+
     // A link into a folded section must open it before jumping.
     function revealFromHash() {
       var id = (location.hash || '').replace('#', '');
       if (!id) return;
       var target = document.getElementById(id) || document.getElementById('sec-' + id);
       if (!target) return;
+      var targetGroup = groupIdFor(target);
+      if (targetGroup && selectedScope !== 'all' && targetGroup !== selectedScope) {
+        applyScope(targetGroup, true);
+      }
       var section = target.closest ? target.closest('.help-section') : null;
       if (section) section.open = true;
-      target.scrollIntoView({ block: 'start' });
+      window.requestAnimationFrame(function () { target.scrollIntoView({ block: 'start' }); });
       // On a small screen the hash may point at content behind the drawer;
       // closing it after navigating keeps the jump from feeling like nothing
       // happened.
@@ -248,7 +321,6 @@
       }
     }
     window.addEventListener('hashchange', revealFromHash);
-    revealFromHash();
 
     // Keep the sidebar and breadcrumb in step with what is on screen: open
     // ONLY the chapter that owns the visible section (closing every other one
@@ -347,6 +419,11 @@
       }, { rootMargin: '0px 0px -75% 0px' });
       content.querySelectorAll('.help-section-title').forEach(function (el) { observer.observe(el); });
     }
+
+    var requestedScope = new URLSearchParams(window.location.search).get('scope');
+    var hashTarget = location.hash ? document.getElementById(location.hash.slice(1)) : null;
+    applyScope(requestedScope || groupIdFor(hashTarget) || 'user-guide', false);
+    revealFromHash();
   })();
 </script>
 {% endblock %}

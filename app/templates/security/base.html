@@ -23,6 +23,27 @@
       .nav-link.active { font-weight: 600; }
       body.pick-mode nav.navbar { display: none; }
       body.pick-mode main.container { max-width: 100%; margin: 0; padding: 0.75rem; }
+      .tm-context-help {
+        align-items: center;
+        background: #0d6efd;
+        border: 2px solid #fff;
+        border-radius: 50%;
+        bottom: 1rem;
+        box-shadow: 0 .2rem .7rem rgba(0, 0, 0, .24);
+        color: #fff;
+        display: inline-flex;
+        font-size: 1rem;
+        font-weight: 700;
+        height: 2.25rem;
+        justify-content: center;
+        position: fixed;
+        right: 1rem;
+        text-decoration: none;
+        width: 2.25rem;
+        z-index: 1035;
+      }
+      .tm-context-help:hover, .tm-context-help:focus-visible { background: #0b5ed7; color: #fff; transform: translateY(-1px); }
+      body.pick-mode .tm-context-help { display: none; }
     </style>
   </head>
   <body class="tm-body {{ body_class|default('') }}">
@@ -83,21 +104,21 @@
             {% if current_user.is_authenticated %}
               {% if has_perm('parts.read') %}
               <li class="nav-item">
-                <a class="nav-link{% if parts_active %} active{% endif %}" href="{{ parts_href }}"{% if parts_active %} aria-current="page"{% endif %}>Parts</a>
+                <a class="nav-link{% if parts_active %} active{% endif %}" href="{{ parts_href }}" title="Find parts, open revisions and inspect BOMs"{% if parts_active %} aria-current="page"{% endif %}>Parts</a>
               </li>
               {% endif %}
               {% if jobs_view or jobs_create %}
                 {% if jobs_view and jobs_create %}
                 <li class="nav-item dropdown">
-                  <a class="nav-link dropdown-toggle{% if jobs_active %} active{% endif %}" href="#" id="navJobs" role="button" data-bs-toggle="dropdown" aria-expanded="false">Jobs</a>
+                  <a class="nav-link dropdown-toggle{% if jobs_active %} active{% endif %}" href="#" id="navJobs" role="button" data-bs-toggle="dropdown" aria-expanded="false" title="Review and create production jobs">Jobs</a>
                   <ul class="dropdown-menu" aria-labelledby="navJobs">
-                    {% if jobs_view %}<li><a class="dropdown-item{% if request_endpoint == 'admin_jobs.jobs_list' %} active{% endif %}" href="{{ url_for('admin_jobs.jobs_list') }}">All Jobs</a></li>{% endif %}
-                    {% if jobs_create %}<li><a class="dropdown-item{% if request_endpoint == 'admin_jobs.jobs_new' %} active{% endif %}" href="{{ url_for('admin_jobs.jobs_new') }}">New Job</a></li>{% endif %}
+                    {% if jobs_view %}<li><a class="dropdown-item{% if request_endpoint == 'admin_jobs.jobs_list' %} active{% endif %}" href="{{ url_for('admin_jobs.jobs_list') }}" title="Browse and manage existing jobs">All Jobs</a></li>{% endif %}
+                    {% if jobs_create %}<li><a class="dropdown-item{% if request_endpoint == 'admin_jobs.jobs_new' %} active{% endif %}" href="{{ url_for('admin_jobs.jobs_new') }}" title="Create a production job">New Job</a></li>{% endif %}
                   </ul>
                 </li>
                 {% else %}
                 <li class="nav-item">
-                  <a class="nav-link{% if jobs_active %} active{% endif %}" href="{{ url_for('admin_jobs.jobs_list' if jobs_view else 'admin_jobs.jobs_new') }}"{% if jobs_active %} aria-current="page"{% endif %}>Jobs</a>
+                  <a class="nav-link{% if jobs_active %} active{% endif %}" href="{{ url_for('admin_jobs.jobs_list' if jobs_view else 'admin_jobs.jobs_new') }}" title="Review or create production jobs"{% if jobs_active %} aria-current="page"{% endif %}>Jobs</a>
                 </li>
                 {% endif %}
               {% endif %}
@@ -105,22 +126,22 @@
               {% if orders_view or orders_create %}
                 {% if orders_view and orders_create %}
                 <li class="nav-item dropdown">
-                  <a class="nav-link dropdown-toggle{% if orders_active %} active{% endif %}" href="#" id="navOrders" role="button" data-bs-toggle="dropdown" aria-expanded="false">Orders</a>
+                  <a class="nav-link dropdown-toggle{% if orders_active %} active{% endif %}" href="#" id="navOrders" role="button" data-bs-toggle="dropdown" aria-expanded="false" title="Review and create customer or supplier orders">Orders</a>
                   <ul class="dropdown-menu" aria-labelledby="navOrders">
-                    {% if orders_view %}<li><a class="dropdown-item{% if request_endpoint == 'admin_orders.orders_list' %} active{% endif %}" href="{{ url_for('admin_orders.orders_list') }}">All Orders</a></li>{% endif %}
-                    {% if orders_create %}<li><a class="dropdown-item{% if request_endpoint == 'admin_orders.orders_new' %} active{% endif %}" href="{{ url_for('admin_orders.orders_new') }}">New Order</a></li>{% endif %}
+                    {% if orders_view %}<li><a class="dropdown-item{% if request_endpoint == 'admin_orders.orders_list' %} active{% endif %}" href="{{ url_for('admin_orders.orders_list') }}" title="Browse and manage existing orders">All Orders</a></li>{% endif %}
+                    {% if orders_create %}<li><a class="dropdown-item{% if request_endpoint == 'admin_orders.orders_new' %} active{% endif %}" href="{{ url_for('admin_orders.orders_new') }}" title="Create an order">New Order</a></li>{% endif %}
                   </ul>
                 </li>
                 {% else %}
                 <li class="nav-item">
-                  <a class="nav-link{% if orders_active %} active{% endif %}" href="{{ url_for('admin_orders.orders_list' if orders_view else 'admin_orders.orders_new') }}"{% if orders_active %} aria-current="page"{% endif %}>Orders</a>
+                  <a class="nav-link{% if orders_active %} active{% endif %}" href="{{ url_for('admin_orders.orders_list' if orders_view else 'admin_orders.orders_new') }}" title="Review or create customer and supplier orders"{% if orders_active %} aria-current="page"{% endif %}>Orders</a>
                 </li>
                 {% endif %}
               {% endif %}
 
               {% if customers_view or customers_update or suppliers_view or suppliers_update %}
               <li class="nav-item dropdown">
-                <a class="nav-link dropdown-toggle{% if companies_active %} active{% endif %}" href="#" id="navCompanies" role="button" data-bs-toggle="dropdown" aria-expanded="false">Companies</a>
+                <a class="nav-link dropdown-toggle{% if companies_active %} active{% endif %}" href="#" id="navCompanies" role="button" data-bs-toggle="dropdown" aria-expanded="false" title="Manage customer and supplier records">Companies</a>
                 <ul class="dropdown-menu tm-nav-menu" aria-labelledby="navCompanies">
                   {% if customers_view or customers_update %}
                   <li><h6 class="dropdown-header tm-nav-section-title">Customers</h6></li>
@@ -140,10 +161,10 @@
               {% endif %}
 
               {% if has_perm('exports.run') %}
-              <li class="nav-item"><a class="nav-link{% if tools_active %} active{% endif %}" href="{{ url_for('tools.tools_index') }}"{% if tools_active %} aria-current="page"{% endif %}>Tools</a></li>
+              <li class="nav-item"><a class="nav-link{% if tools_active %} active{% endif %}" href="{{ url_for('tools.tools_index') }}" title="Download add-ins, templates and export tools"{% if tools_active %} aria-current="page"{% endif %}>Tools</a></li>
               {% endif %}
               {% if has_perm('imports.preview') or has_perm('imports.execute_low_risk') or has_perm('imports.execute_approved') %}
-              <li class="nav-item"><a class="nav-link{% if import_active %} active{% endif %}" href="{{ import_href }}"{% if import_active %} aria-current="page"{% endif %}>Import</a></li>
+              <li class="nav-item"><a class="nav-link{% if import_active %} active{% endif %}" href="{{ import_href }}" title="Preview and apply a TinyMRP upload pack"{% if import_active %} aria-current="page"{% endif %}>Import</a></li>
               {% endif %}
             {% endif %}
           </ul>
@@ -189,7 +210,7 @@
               </li>
               {% if is_admin %}
               <li class="nav-item dropdown">
-                <a class="nav-link dropdown-toggle{% if admin_active %} active{% endif %}" href="#" id="navAdmin" role="button" data-bs-toggle="dropdown" aria-expanded="false">Admin</a>
+                <a class="nav-link dropdown-toggle{% if admin_active %} active{% endif %}" href="#" id="navAdmin" role="button" data-bs-toggle="dropdown" aria-expanded="false" title="Open administration, access and system tools">Admin</a>
                 <ul class="dropdown-menu dropdown-menu-end tm-nav-menu tm-admin-launcher" aria-labelledby="navAdmin">
                   <li><a class="dropdown-item tm-admin-launcher__overview{% if request_endpoint == 'admin.admin_index' %} active{% endif %}" href="{{ url_for('admin.admin_index') }}">
                     <span class="tm-admin-launcher__mark" aria-hidden="true">A</span>
@@ -236,7 +257,7 @@
               </li>
               {% endif %}
               <li class="nav-item dropdown">
-                <a class="nav-link dropdown-toggle" href="#" id="navUser" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                <a class="nav-link dropdown-toggle" href="#" id="navUser" role="button" data-bs-toggle="dropdown" aria-expanded="false" title="Open account, token and help options">
                   <span class="nav-account">
                     <span
                       class="account-avatar account-avatar--sm account-avatar--{{ nav_profile.avatar_shape or 'circle' }}"
@@ -257,9 +278,12 @@
                     <div class="small text-muted">{{ current_user.email }}</div>
                   </li>
                   <li><hr class="dropdown-divider"></li>
-                  <li><a class="dropdown-item{% if account_active %} active{% endif %}" href="{{ url_for('main.app_home') }}">My Account</a></li>
-                  <li><a class="dropdown-item{% if tokens_active %} active{% endif %}" href="{{ tokens_href }}">Tokens</a></li>
-                  <li><a class="dropdown-item{% if help_active %} active{% endif %}" href="/help">Help</a></li>
+                  <li><a class="dropdown-item{% if account_active %} active{% endif %}" href="{{ url_for('main.app_home') }}" title="Review your current work, notifications and profile">My Account</a></li>
+                  <li><a class="dropdown-item{% if tokens_active %} active{% endif %}" href="{{ tokens_href }}" title="Create or rotate SolidWorks add-in access tokens">Tokens</a></li>
+                  <li><hr class="dropdown-divider"></li>
+                  <li><h6 class="dropdown-header">Help &amp; documentation</h6></li>
+                  <li><a class="dropdown-item{% if help_active %} active{% endif %}" href="/help" title="Day-to-day guidance for TinyMRP screens and workflows">User guide</a></li>
+                  <li><a class="dropdown-item" href="/help?scope=all" title="Browse installation, operations, security, product and engineering documentation">Documentation library</a></li>
                   <li><hr class="dropdown-divider"></li>
                   <li>
                     <form class="px-3" method="post" action="{{ url_for_security('logout') }}">
@@ -362,6 +386,18 @@
       {% block content %}{% endblock %}
     </main>
 
+    {% if current_user.is_authenticated and not help_active %}
+    <a
+      id="contextHelpLink"
+      class="tm-context-help"
+      href="/help"
+      data-help-root="/help"
+      data-help-map-url="{{ url_for('static', filename='help/context_help.json') }}"
+      aria-label="Open help for this page"
+      title="Open help for this page"
+    ><span aria-hidden="true">?</span><span class="visually-hidden">Help for this page</span></a>
+    {% endif %}
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/js/bootstrap.bundle.min.js"></script>
     {% if current_user.is_authenticated %}
     <script nonce="{{ csp_nonce() }}">
@@ -453,6 +489,9 @@
     </script>
     {% endif %}
     <script src="{{ url_for('static', filename='js/admin-actions.js') }}"></script>
+    {% if current_user.is_authenticated and not help_active %}
+    <script src="{{ url_for('static', filename='js/context-help.js') }}?v={{ STATIC_VERSION|default('v1') }}"></script>
+    {% endif %}
     {% block extra_scripts %}{% endblock %}
   </body>
 </html>

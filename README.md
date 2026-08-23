@@ -101,9 +101,14 @@ API endpoints:
 
 ## Help System
 
-- Help content lives in `docs/help/` (markdown).
+- Repository Markdown and text files are the single documentation source. The
+  `/help` UI builds them into labelled user, operations, security, product,
+  and engineering sections; day-to-day user guidance is the default. Developer
+  history and evidence remain repository-only.
 - Generate the static help page with: `flask help build`.
 - The output is written to `app/static/help/help.html` and `app/static/help/help_toc.json`.
+- Contextual `?` links use `app/static/help/context_help.json` to connect each
+  authenticated UI area to its applicable user-guide section.
 - Commit the generated files so `/help` is always up to date.
 
 ## SolidWorks Add-in

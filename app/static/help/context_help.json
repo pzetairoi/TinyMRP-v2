@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "default": {
+    "target": "getting-started",
+    "label": "Open the TinyMRP user guide"
+  },
+  "rules": [
+    { "path": "/app", "match": "exact", "target": "home-and-notifications", "label": "Help with My Account, current reviews and notifications" },
+    { "path": "/ui/dashboard", "match": "exact", "target": "dashboard", "label": "Help with the dashboard" },
+    { "path": "/ui/parts", "match": "exact", "target": "inventory", "label": "Help with inventory search, filters and columns" },
+    { "path": "/ui/part/", "match": "prefix", "target": "part-details", "label": "Help with part details, files, reviews and actions" },
+    { "path": "/ui/bom", "match": "prefix", "target": "bom-view", "label": "Help with BOM views" },
+    { "path": "/ui/upload-pack", "match": "exact", "target": "import", "label": "Help with upload-pack preview and import" },
+    { "path": "/ui/addin/tokens", "match": "exact", "target": "tokens", "label": "Help with add-in access tokens" },
+    { "path": "/ui/admin/addin", "match": "exact", "target": "add-in-admin-uiadminaddin", "label": "Help with SolidWorks add-in administration" },
+    { "path": "/ui/admin/fields", "match": "exact", "target": "fields-and-exports-uiadminfields", "label": "Help with fields, columns and exports" },
+    { "path": "/tools/excelcompile", "match": "prefix", "target": "tools", "label": "Help with the Excel compilation tool" },
+    { "path": "/tools", "match": "prefix", "target": "tools", "label": "Help with downloads and tools" },
+    { "path": "/admin/jobs", "match": "prefix", "target": "jobs-administration-adminjobs", "label": "Help with job administration" },
+    { "path": "/admin/orders", "match": "prefix", "target": "orders-administration-adminorders", "label": "Help with order administration" },
+    { "path": "/admin/customers", "match": "prefix", "target": "customer-and-supplier-master-data", "label": "Help with customer records" },
+    { "path": "/admin/suppliers", "match": "prefix", "target": "customer-and-supplier-master-data", "label": "Help with supplier records" },
+    { "path": "/admin/users", "match": "prefix", "target": "users-and-roles", "label": "Help with users and access" },
+    { "path": "/admin/roles", "match": "prefix", "target": "users-and-roles", "label": "Help with roles and permissions" },
+    { "path": "/admin/settings", "match": "prefix", "target": "app-settings-adminsettings", "label": "Help with application settings" },
+    { "path": "/admin/backups", "match": "prefix", "target": "backups-adminbackups", "label": "Help with backups" },
+    { "path": "/admin/audit", "match": "prefix", "target": "audit-and-metrics", "label": "Help with the audit log" },
+    { "path": "/admin/metrics", "match": "prefix", "target": "audit-and-metrics", "label": "Help with system metrics" },
+    { "path": "/admin/rescan-files", "match": "prefix", "target": "high-risk-operations", "label": "Help with file rescanning" },
+    { "path": "/admin/purge-parts", "match": "prefix", "target": "high-risk-operations", "label": "Help with high-risk maintenance" },
+    { "path": "/admin/", "match": "exact", "target": "admin-dashboard-admin", "label": "Help with the admin workspace" }
+  ]
+}

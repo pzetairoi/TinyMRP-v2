@@ -1,6 +1,9 @@
 # CONTRIBUTING_HELP
 
-This file describes how to write and maintain the help content in `docs/help/`.
+This file describes how to write and maintain the Help UI. Repository
+documentation remains the single source of truth: the build publishes the
+original files into one searchable Help library instead of maintaining a
+second copy.
 
 ## Tone and audience
 
@@ -15,6 +18,35 @@ This file describes how to write and maintain the help content in `docs/help/`.
 - Keep headings short and consistent.
 - Include "Where to find it", "What you can do", "Step-by-step", and "Troubleshooting" for UI pages.
 
+## Library sections
+
+The Help page opens on **User guide**, which is built from the operator-facing
+files in `docs/help/`. Other repository sources are available from the section
+selector and **Documentation library** account-menu link:
+
+- `docs/deployment/` and the server-install pointer: **Installation & operations**.
+- `SECURITY.md` and `docs/security/`: **Security & governance**.
+- `docs/commercial/`: **Product & support**.
+- `README.md`, field/testing references and generated reference material:
+  **Engineering & reference**.
+- `CHANGELOG.md`, production snapshots and `docs/planning/` remain
+  **developer-only history and evidence** in the repository. They are not
+  published in the end-user Help UI.
+
+The builder automatically includes every current `.md` source under `docs/`;
+the coverage test fails if the generated table of contents drifts. Historical
+sources remain checked separately by the documentation-hygiene tests.
+
+## Contextual help
+
+Every authenticated view inherits the compact `?` help link from
+`app/templates/security/base.html`. Route-to-section targets and hover labels
+live in `app/static/help/context_help.json`; keep those targets on stable
+operator-help anchors. `app/static/js/context-help.js` applies the mapping and
+adds native hover descriptions to icon controls that already have accessible
+names. Prefer visible button text for ordinary actions and explicit
+`aria-label` plus `title` for icon-only controls.
+
 ## Formatting rules
 
 - Use numbered steps for procedures.
@@ -28,8 +60,15 @@ This file describes how to write and maintain the help content in `docs/help/`.
 
 ## Regenerate the help page
 
-1) Run `flask help build`.
-2) Commit `app/static/help/help.html` and `app/static/help/help_toc.json`.
+1. Edit the applicable canonical source file; do not copy its prose elsewhere.
+2. Run `flask help build` (or `python tools/build_help.py`).
+3. Run `pytest -q tests/test_help_page.py tests/test_documentation_hygiene.py tests/test_contextual_help_contract.py`.
+4. Check `/help` in the default User guide scope, each library section, search,
+   a deep link, and a narrow/mobile viewport.
+5. From representative UI pages, follow the floating `?` link and confirm it
+   opens the applicable section.
+6. Commit `app/static/help/help.html` and `app/static/help/help_toc.json` with
+   the source and UI changes.
 
 ## Refresh screenshots
 

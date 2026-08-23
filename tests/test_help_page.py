@@ -46,6 +46,28 @@ def test_help_page_renders_collapsible_sections(client, app, user):
     # Search and the expand/collapse controls drive the whole page.
     assert 'id="helpSearch"' in body
     assert 'id="helpExpand"' in body
+    assert 'id="helpScope"' in body
+    assert "Help &amp; documentation" in body
+
+
+def test_help_keeps_user_guidance_first_and_labels_the_full_library(client, app, user):
+    """Technical material is reachable without crowding the default landing view."""
+
+    _admin(user)
+    _login(client, user)
+
+    body = client.get("/help").get_data(as_text=True)
+
+    assert '<option value="user-guide" selected>User guide</option>' in body
+    assert '<option value="all">All available documentation</option>' in body
+    for section in (
+        "Installation &amp; operations",
+        "Security &amp; governance",
+        "Product &amp; support",
+        "Engineering &amp; reference",
+    ):
+        assert section in body
+    assert "History &amp; evidence" not in body
 
 
 def test_help_covers_the_features_users_ask_about(client, app, user):

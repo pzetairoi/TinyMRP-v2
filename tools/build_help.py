@@ -5,15 +5,59 @@ import os
 import re
 import subprocess
 from datetime import datetime, timezone
+from html import escape
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+from urllib.parse import quote, unquote, urlsplit
 
 from markdown_it import MarkdownIt
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DOCS_DIR = REPO_ROOT / "docs" / "help"
+DOCS_DIR = REPO_ROOT / "docs"
 OUTPUT_DIR = REPO_ROOT / "app" / "static" / "help"
+REPOSITORY_BLOB_BASE = "https://github.com/pzetairoi/TinyMRP-v2/blob/main"
+REPOSITORY_TREE_BASE = "https://github.com/pzetairoi/TinyMRP-v2/tree/main"
+
+
+# The source files remain ordinary Markdown/text files in the repository.  The
+# builder only publishes a navigable, authenticated view of them; it never
+# creates a second prose source that can drift away from the originals.
+DOCUMENT_GROUPS: Tuple[Dict[str, Any], ...] = (
+    {
+        "id": "user-guide",
+        "title": "User guide",
+        "description": "Day-to-day workflows, screens, roles and troubleshooting.",
+        "default": True,
+    },
+    {
+        "id": "installation-operations",
+        "title": "Installation & operations",
+        "description": "Current deployment, configuration, networking, backup and update guidance.",
+    },
+    {
+        "id": "security-governance",
+        "title": "Security & governance",
+        "description": "Security policy, access intent, dependency triage and risk controls.",
+    },
+    {
+        "id": "product-support",
+        "title": "Product & support",
+        "description": "Product scope, retention, support and disclosure policies.",
+    },
+    {
+        "id": "engineering-reference",
+        "title": "Engineering & reference",
+        "description": "Architecture, field design, testing and generated technical reference.",
+    },
+)
+
+_ROOT_DOCUMENTS = ("README.md", "SECURITY.md", "CHANGELOG.md")
+_TECHNICAL_HELP_DOCUMENTS = {
+    "docs/help/06b_server_installation.md",
+    "docs/help/08_reference_auto.md",
+    "docs/help/CONTRIBUTING_HELP.md",
+}
 
 
 def _slugify(text: str) -> str:
@@ -36,14 +80,72 @@ def _git_commit() -> str:
         return ""
 
 
-def _read_markdown_files() -> List[Tuple[str, str]]:
-    if not DOCS_DIR.exists():
-        return []
-    files = sorted(p for p in DOCS_DIR.glob("*.md") if p.name != "CONTRIBUTING_HELP.md")
-    out = []
-    for p in files:
-        out.append((p.name, p.read_text(encoding="utf-8")))
-    return out
+def _source_key(path: Path) -> str:
+    return path.relative_to(REPO_ROOT).as_posix()
+
+
+def _document_group(path: Path) -> str:
+    rel = _source_key(path)
+    if rel.startswith("docs/help/") and rel not in _TECHNICAL_HELP_DOCUMENTS:
+        return "user-guide"
+    if rel.startswith("docs/deployment/") or rel == "docs/help/06b_server_installation.md":
+        return "installation-operations"
+    if rel == "SECURITY.md" or rel.startswith("docs/security/"):
+        return "security-governance"
+    if rel.startswith("docs/commercial/"):
+        return "product-support"
+    if rel == "CHANGELOG.md" or rel.startswith("docs/planning/") or rel in {
+        "docs/PRODUCTION_HARDENING_BASELINE.md",
+        "docs/UPDATING_PRODUCTION.md",
+    }:
+        return "history"
+    return "engineering-reference"
+
+
+def _source_sort_key(path: Path) -> Tuple[int, str]:
+    """Put directory indexes before their detail pages, then sort naturally."""
+
+    rel = _source_key(path)
+    return (0 if path.name.lower() == "readme.md" else 1, rel.lower())
+
+
+def _documentation_sources() -> List[Path]:
+    files = [
+        path
+        for path in DOCS_DIR.rglob("*")
+        if path.is_file() and path.suffix.lower() in {".md", ".txt"}
+    ]
+    files.extend(REPO_ROOT / name for name in _ROOT_DOCUMENTS if (REPO_ROOT / name).is_file())
+    # Planning archives, changelogs and point-in-time production evidence stay
+    # in the repository for developers. They are deliberately not published in
+    # the end-user Help UI.
+    return sorted((path for path in files if _document_group(path) != "history"), key=_source_sort_key)
+
+
+def _document_id(path: Path) -> str:
+    rel = path.relative_to(REPO_ROOT).with_suffix("").as_posix()
+    if rel.startswith("docs/"):
+        rel = rel[5:]
+    return "doc-" + _slugify(rel.replace("/", " "))
+
+
+def _fallback_title(path: Path) -> str:
+    return path.stem.replace("_", " ").replace("-", " ").strip().title()
+
+
+def _read_document(path: Path) -> str:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if path.suffix.lower() == ".txt":
+        return (
+            f"# {_fallback_title(path)}\n\n"
+            "> Historical plain-text archive. Treat this as evidence, not current instructions.\n\n"
+            "## Archived text\n\n```text\n"
+            + text
+            + "\n```"
+        )
+    if not re.search(r"(?m)^#\s+\S", text):
+        text = f"# {_fallback_title(path)}\n\n{text}"
+    return text
 
 
 def _extract_ui_routes() -> List[Dict[str, str]]:
@@ -385,33 +487,114 @@ def _replace_placeholders(text: str, values: Dict[str, str]) -> str:
     return out
 
 
-def _build_toc(tokens) -> List[Dict[str, Any]]:
+def _build_toc(
+    tokens,
+    *,
+    document_id: str | None = None,
+    used_ids: set[str] | None = None,
+) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
     """Return chapters (h1) each holding their sections (h2).
 
     A flat list of every heading ran to well over a hundred entries, which is
     unusable as navigation. Third-level headings stay addressable by anchor but
-    are left out of the tree.
+    are left out of the tree. Repository-reference documents get a document
+    prefix so repeated headings such as "Overview" cannot collide. The user
+    guide keeps its established public anchors because screens deep-link to it.
     """
 
     toc: List[Dict[str, Any]] = []
-    slug_counts: Dict[str, int] = {}
+    heading_targets: Dict[str, str] = {}
+    occupied = used_ids if used_ids is not None else set()
+    first_h1 = True
     for i, token in enumerate(tokens):
         if token.type != "heading_open":
             continue
         level = int(token.tag[1])
         title = tokens[i + 1].content if i + 1 < len(tokens) else ""
-        slug = _slugify(title)
-        if slug in slug_counts:
-            slug_counts[slug] += 1
-            slug = f"{slug}-{slug_counts[slug]}"
+        source_slug = _slugify(title)
+        if document_id and level == 1 and first_h1:
+            candidate = document_id
+        elif document_id:
+            candidate = f"{document_id}--{source_slug}"
         else:
-            slug_counts[slug] = 1
+            candidate = source_slug
+        slug = candidate
+        suffix = 2
+        while slug in occupied:
+            slug = f"{candidate}-{suffix}"
+            suffix += 1
+        occupied.add(slug)
         token.attrSet("id", slug)
+        heading_targets.setdefault(source_slug, slug)
         if level == 1:
             toc.append({"id": slug, "title": title, "sections": []})
+            first_h1 = False
         elif level == 2 and toc:
             toc[-1]["sections"].append({"id": slug, "title": title})
-    return toc
+    return toc, heading_targets
+
+
+def _walk_link_tokens(tokens):
+    for token in tokens:
+        if token.type == "link_open":
+            yield token
+        if token.children:
+            yield from _walk_link_tokens(token.children)
+
+
+def _repository_url(path: Path) -> str:
+    try:
+        rel = path.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return ""
+    base = REPOSITORY_TREE_BASE if path.is_dir() else REPOSITORY_BLOB_BASE
+    return f"{base}/{quote(rel, safe='/')}"
+
+
+def _rewrite_document_links(
+    tokens,
+    *,
+    source: Path,
+    record_by_path: Dict[Path, Dict[str, Any]],
+    group_by_directory: Dict[Path, str],
+    heading_targets: Dict[str, str],
+) -> None:
+    """Make repository-relative Markdown links work inside the one-page UI."""
+
+    for token in _walk_link_tokens(tokens):
+        href = token.attrGet("href") or ""
+        parsed = urlsplit(href)
+        if parsed.scheme or parsed.netloc or href.startswith(("/", "mailto:", "tel:")):
+            continue
+
+        fragment = unquote(parsed.fragment or "")
+        if not parsed.path:
+            if fragment:
+                token.attrSet("href", "#" + heading_targets.get(_slugify(fragment), _slugify(fragment)))
+            continue
+
+        target = (source.parent / unquote(parsed.path)).resolve()
+        if target.is_dir() and (target / "README.md").resolve() in record_by_path:
+            target = (target / "README.md").resolve()
+
+        target_record = record_by_path.get(target)
+        if target_record:
+            target_id = target_record["document_id"]
+            if fragment:
+                target_id = target_record["heading_targets"].get(_slugify(fragment), target_id)
+            token.attrSet("href", "#" + target_id)
+            continue
+
+        group_id = group_by_directory.get(target)
+        if group_id:
+            token.attrSet("href", "#help-group-" + group_id)
+            continue
+
+        repo_url = _repository_url(target)
+        if repo_url:
+            if fragment:
+                repo_url += "#" + quote(fragment, safe="-_")
+            token.attrSet("href", repo_url)
 
 
 _LONE_IMG_RE = re.compile(r'<p>(<img src="([^"]+)" alt="([^"]*)"[^>]*>)</p>')
@@ -473,16 +656,105 @@ def _collapsible(html: str) -> str:
 
 
 def build_help() -> Dict[str, str]:
-    md_files = _read_markdown_files()
-    combined = "\n\n".join(content for _, content in md_files)
     placeholders = _render_placeholders()
-    combined = _replace_placeholders(combined, placeholders)
-
     md = MarkdownIt("gfm-like", {"html": True})
     md.disable("linkify")
-    tokens = md.parse(combined)
-    toc = _build_toc(tokens)
-    html = _collapsible(_figures(md.renderer.render(tokens, md.options, {})))
+
+    records: List[Dict[str, Any]] = []
+    record_by_path: Dict[Path, Dict[str, Any]] = {}
+    user_guide_ids: set[str] = set()
+    reference_ids: set[str] = set()
+
+    # Parse and assign every anchor first. Relative links can then be rewritten
+    # to their final in-page target even when they point to a later document.
+    for source in _documentation_sources():
+        group_id = _document_group(source)
+        source_text = _replace_placeholders(_read_document(source), placeholders)
+        tokens = md.parse(source_text)
+        generated_document_id = _document_id(source)
+        toc, heading_targets = _build_toc(
+            tokens,
+            document_id=None if group_id == "user-guide" else generated_document_id,
+            used_ids=user_guide_ids if group_id == "user-guide" else reference_ids,
+        )
+        if not toc:
+            raise ValueError(f"documentation source has no chapter heading: {_source_key(source)}")
+        for chapter in toc:
+            chapter["source"] = _source_key(source)
+            chapter["source_url"] = _repository_url(source)
+        record = {
+            "path": source.resolve(),
+            "source": _source_key(source),
+            "source_url": _repository_url(source),
+            "group_id": group_id,
+            "document_id": toc[0]["id"],
+            "heading_targets": heading_targets,
+            "tokens": tokens,
+            "toc": toc,
+        }
+        records.append(record)
+        record_by_path[source.resolve()] = record
+
+    group_by_directory: Dict[Path, str] = {}
+    for directory in [path for path in DOCS_DIR.rglob("*") if path.is_dir()]:
+        child_groups = {
+            record["group_id"]
+            for record in records
+            if directory.resolve() in record["path"].parents
+        }
+        if len(child_groups) == 1:
+            group_by_directory[directory.resolve()] = child_groups.pop()
+
+    group_defs = {group["id"]: dict(group) for group in DOCUMENT_GROUPS}
+    group_html: Dict[str, List[str]] = {group["id"]: [] for group in DOCUMENT_GROUPS}
+    group_toc: Dict[str, List[Dict[str, Any]]] = {group["id"]: [] for group in DOCUMENT_GROUPS}
+
+    for record in records:
+        _rewrite_document_links(
+            record["tokens"],
+            source=record["path"],
+            record_by_path=record_by_path,
+            group_by_directory=group_by_directory,
+            heading_targets=record["heading_targets"],
+        )
+        rendered = _collapsible(
+            _figures(md.renderer.render(record["tokens"], md.options, {}))
+        )
+        group_html[record["group_id"]].append(
+            '<article class="help-document" data-help-source="{}">'
+            '<div class="help-source">Canonical source: '
+            '<a href="{}" target="_blank" rel="noopener noreferrer"><code>{}</code></a>'
+            '</div>{}</article>'.format(
+                escape(record["source"], quote=True),
+                escape(record["source_url"], quote=True),
+                escape(record["source"]),
+                rendered,
+            )
+        )
+        group_toc[record["group_id"]].extend(record["toc"])
+
+    toc: List[Dict[str, Any]] = []
+    rendered_groups: List[str] = []
+    for group in DOCUMENT_GROUPS:
+        group_id = group["id"]
+        chapters = group_toc[group_id]
+        if not chapters:
+            continue
+        toc_group = dict(group_defs[group_id])
+        toc_group["chapters"] = chapters
+        toc.append(toc_group)
+        rendered_groups.append(
+            '<section class="help-group" data-help-group="{}" id="help-group-{}">'
+            '<header class="help-group-header"><h2>{}</h2><p>{}</p></header>{}</section>'.format(
+                escape(group_id, quote=True),
+                escape(group_id, quote=True),
+                escape(group["title"]),
+                escape(group["description"]),
+                "".join(group_html[group_id]),
+            )
+        )
+
+    help_html = "".join(rendered_groups)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     help_html_path = OUTPUT_DIR / "help.html"
@@ -491,12 +763,14 @@ def build_help() -> Dict[str, str]:
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     commit = _git_commit()
 
-    help_html_path.write_text(html, encoding="utf-8")
+    help_html_path.write_text(help_html, encoding="utf-8")
     help_toc_path.write_text(
         json.dumps(
             {
+                "schema_version": 2,
                 "generated_at": generated_at,
                 "commit": commit,
+                "source_count": len(records),
                 "items": toc,
             },
             indent=2,

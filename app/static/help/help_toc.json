@@ -1,426 +1,1704 @@
 {
-  "generated_at": "2026-08-22 23:04 UTC",
-  "commit": "be605a2",
+  "schema_version": 2,
+  "generated_at": "2026-08-23 00:12 UTC",
+  "commit": "d96a46c",
+  "source_count": 38,
   "items": [
     {
-      "id": "getting-started",
-      "title": "Getting Started",
-      "sections": [
+      "id": "user-guide",
+      "title": "User guide",
+      "description": "Day-to-day workflows, screens, roles and troubleshooting.",
+      "default": true,
+      "chapters": [
         {
-          "id": "the-five-minute-version",
-          "title": "The five-minute version"
+          "id": "getting-started",
+          "title": "Getting Started",
+          "sections": [
+            {
+              "id": "the-five-minute-version",
+              "title": "The five-minute version"
+            },
+            {
+              "id": "the-one-idea-that-explains-everything",
+              "title": "The one idea that explains everything"
+            },
+            {
+              "id": "approved-vs-draft",
+              "title": "Approved vs draft"
+            },
+            {
+              "id": "what-you-can-see-depends-on-your-role",
+              "title": "What you can see depends on your role"
+            },
+            {
+              "id": "where-to-go-next",
+              "title": "Where to go next"
+            },
+            {
+              "id": "a-note-on-this-help",
+              "title": "A note on this help"
+            }
+          ],
+          "source": "docs/help/00_overview.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/help/00_overview.md"
         },
         {
-          "id": "the-one-idea-that-explains-everything",
-          "title": "The one idea that explains everything"
+          "id": "using-the-web-app",
+          "title": "Using the Web App",
+          "sections": [
+            {
+              "id": "finding-your-way-around",
+              "title": "Finding your way around"
+            },
+            {
+              "id": "home-and-notifications",
+              "title": "Home and notifications"
+            },
+            {
+              "id": "inventory",
+              "title": "Inventory"
+            },
+            {
+              "id": "part-details",
+              "title": "Part Details"
+            },
+            {
+              "id": "doc-packs",
+              "title": "Doc Packs"
+            },
+            {
+              "id": "bom-view",
+              "title": "BOM view"
+            },
+            {
+              "id": "dashboard",
+              "title": "Dashboard"
+            },
+            {
+              "id": "import",
+              "title": "Import"
+            },
+            {
+              "id": "jobs-and-orders",
+              "title": "Jobs and Orders"
+            },
+            {
+              "id": "tokens",
+              "title": "Tokens"
+            },
+            {
+              "id": "tools",
+              "title": "Tools"
+            },
+            {
+              "id": "admin",
+              "title": "Admin"
+            }
+          ],
+          "source": "docs/help/01_web_ui_walkthrough.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/help/01_web_ui_walkthrough.md"
         },
         {
-          "id": "approved-vs-draft",
-          "title": "Approved vs draft"
+          "id": "import-what-each-choice-does",
+          "title": "Import: what each choice does",
+          "sections": [
+            {
+              "id": "the-two-choices-2",
+              "title": "The two choices"
+            },
+            {
+              "id": "overwrite-means-the-pack-wins-outright",
+              "title": "\u201cOverwrite\u201d means the pack wins outright"
+            },
+            {
+              "id": "what-counts-as-approved",
+              "title": "What counts as approved"
+            },
+            {
+              "id": "properties",
+              "title": "Properties"
+            },
+            {
+              "id": "bom",
+              "title": "BOM"
+            },
+            {
+              "id": "files",
+              "title": "Files"
+            },
+            {
+              "id": "who-can-do-what",
+              "title": "Who can do what"
+            },
+            {
+              "id": "reading-the-result",
+              "title": "Reading the result"
+            },
+            {
+              "id": "guided-exercise-with-real-test-packs",
+              "title": "Guided exercise with real test packs"
+            },
+            {
+              "id": "import-faq",
+              "title": "Import FAQ"
+            }
+          ],
+          "source": "docs/help/01b_import_reference.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/help/01b_import_reference.md"
         },
         {
-          "id": "what-you-can-see-depends-on-your-role",
-          "title": "What you can see depends on your role"
+          "id": "roles-and-permissions",
+          "title": "Roles and Permissions",
+          "sections": [
+            {
+              "id": "how-access-is-decided",
+              "title": "How access is decided"
+            },
+            {
+              "id": "the-standard-roles",
+              "title": "The standard roles"
+            },
+            {
+              "id": "the-rules-that-surprise-people",
+              "title": "The rules that surprise people"
+            },
+            {
+              "id": "when-something-is-refused",
+              "title": "When something is refused"
+            },
+            {
+              "id": "for-administrators",
+              "title": "For administrators"
+            }
+          ],
+          "source": "docs/help/02_roles_and_permissions.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/help/02_roles_and_permissions.md"
         },
         {
-          "id": "where-to-go-next",
-          "title": "Where to go next"
+          "id": "installing-the-solidworks-add-in",
+          "title": "Installing the SolidWorks Add-in",
+          "sections": [
+            {
+              "id": "before-you-start",
+              "title": "Before You Start"
+            },
+            {
+              "id": "get-the-installer",
+              "title": "Get The Installer"
+            },
+            {
+              "id": "run-the-installer",
+              "title": "Run The Installer"
+            },
+            {
+              "id": "enable-in-solidworks",
+              "title": "Enable In SolidWorks"
+            },
+            {
+              "id": "open-the-task-pane",
+              "title": "Open The Task Pane"
+            },
+            {
+              "id": "first-connection-recommended",
+              "title": "First Connection (Recommended)"
+            },
+            {
+              "id": "where-settings-are-stored",
+              "title": "Where Settings Are Stored"
+            },
+            {
+              "id": "manual-register-repair-if-needed",
+              "title": "Manual Register / Repair (If Needed)"
+            },
+            {
+              "id": "silent-install-it-deployment",
+              "title": "Silent Install (IT Deployment)"
+            }
+          ],
+          "source": "docs/help/03_addin_installation.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/help/03_addin_installation.md"
         },
         {
-          "id": "a-note-on-this-help",
-          "title": "A note on this help"
+          "id": "using-the-solidworks-add-in",
+          "title": "Using the SolidWorks Add-in",
+          "sections": [
+            {
+              "id": "publishbom-tab",
+              "title": "Publish/BOM Tab"
+            },
+            {
+              "id": "tools-tab",
+              "title": "Tools Tab"
+            },
+            {
+              "id": "numbering-tab",
+              "title": "Numbering Tab"
+            },
+            {
+              "id": "configuration-tab",
+              "title": "Configuration Tab"
+            },
+            {
+              "id": "recommended-daily-flows",
+              "title": "Recommended Daily Flows"
+            }
+          ],
+          "source": "docs/help/04_addin_ui_walkthrough.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/help/04_addin_ui_walkthrough.md"
+        },
+        {
+          "id": "common-workflows",
+          "title": "Common Workflows",
+          "sections": [
+            {
+              "id": "workflow-a-cad-to-production-package",
+              "title": "Workflow A: CAD To Production Package"
+            },
+            {
+              "id": "workflow-b-progressive-ordering-across-multi-level-bom",
+              "title": "Workflow B: Progressive Ordering Across Multi-Level BOM"
+            },
+            {
+              "id": "understanding-over-ordered-behavior",
+              "title": "Understanding Over-Ordered Behavior"
+            },
+            {
+              "id": "order-lifecycle-notes",
+              "title": "Order Lifecycle Notes"
+            },
+            {
+              "id": "scope-of-supply-and-customer-deliverables",
+              "title": "Scope Of Supply and Customer Deliverables"
+            },
+            {
+              "id": "iteration-loop-engineering-change",
+              "title": "Iteration Loop (Engineering Change)"
+            }
+          ],
+          "source": "docs/help/05_end_to_end_workflow.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/help/05_end_to_end_workflow.md"
+        },
+        {
+          "id": "configuration",
+          "title": "Configuration",
+          "sections": [
+            {
+              "id": "admin-dashboard-admin",
+              "title": "Admin Dashboard (`/admin`)"
+            },
+            {
+              "id": "app-settings-adminsettings",
+              "title": "App Settings (`/admin/settings`)"
+            },
+            {
+              "id": "users-and-roles",
+              "title": "Users And Roles"
+            },
+            {
+              "id": "fields-and-exports-uiadminfields",
+              "title": "Fields And Exports (`/ui/admin/fields`)"
+            },
+            {
+              "id": "access-scoping-model-operational-view",
+              "title": "Access Scoping Model (Operational View)"
+            },
+            {
+              "id": "customer-and-supplier-master-data",
+              "title": "Customer And Supplier Master Data"
+            },
+            {
+              "id": "jobs-administration-adminjobs",
+              "title": "Jobs Administration (`/admin/jobs`)"
+            },
+            {
+              "id": "orders-administration-adminorders",
+              "title": "Orders Administration (`/admin/orders`)"
+            },
+            {
+              "id": "add-in-admin-uiadminaddin",
+              "title": "Add-in Admin (`/ui/admin/addin`)"
+            },
+            {
+              "id": "upload-pack-housekeeping",
+              "title": "Upload pack housekeeping"
+            },
+            {
+              "id": "backups-adminbackups",
+              "title": "Backups (`/admin/backups`)"
+            },
+            {
+              "id": "audit-and-metrics",
+              "title": "Audit And Metrics"
+            },
+            {
+              "id": "high-risk-operations",
+              "title": "High-Risk Operations"
+            }
+          ],
+          "source": "docs/help/06_customization_admin.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/help/06_customization_admin.md"
+        },
+        {
+          "id": "troubleshooting",
+          "title": "Troubleshooting",
+          "sections": [
+            {
+              "id": "i-cannot-see-a-part-that-i-know-exists",
+              "title": "I cannot see a part that I know exists"
+            },
+            {
+              "id": "the-approved-badge-is-wrong",
+              "title": "The approved badge is wrong"
+            },
+            {
+              "id": "files-are-missing-from-a-part",
+              "title": "Files are missing from a part"
+            },
+            {
+              "id": "the-import-created-parts-i-did-not-expect",
+              "title": "The import created parts I did not expect"
+            },
+            {
+              "id": "the-import-did-nothing-did-too-much",
+              "title": "The import did nothing / did too much"
+            },
+            {
+              "id": "an-import-says-i-lack-permission",
+              "title": "An import says I lack permission"
+            },
+            {
+              "id": "a-doc-pack-is-missing-sections",
+              "title": "A Doc Pack is missing sections"
+            },
+            {
+              "id": "a-doc-pack-is-taking-a-long-time",
+              "title": "A Doc Pack is taking a long time"
+            },
+            {
+              "id": "comments-or-markups-are-not-visible",
+              "title": "Comments or markups are not visible"
+            },
+            {
+              "id": "jobs-and-ordering-look-wrong",
+              "title": "Jobs and ordering look wrong"
+            },
+            {
+              "id": "the-add-in-cannot-connect",
+              "title": "The add-in cannot connect"
+            },
+            {
+              "id": "the-browser-shows-an-authentication-or-csrf-error",
+              "title": "The browser shows an authentication or CSRF error"
+            },
+            {
+              "id": "what-to-collect-before-asking-for-help",
+              "title": "What to collect before asking for help"
+            }
+          ],
+          "source": "docs/help/07_troubleshooting.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/help/07_troubleshooting.md"
         }
       ]
     },
     {
-      "id": "using-the-web-app",
-      "title": "Using the Web App",
-      "sections": [
+      "id": "installation-operations",
+      "title": "Installation & operations",
+      "description": "Current deployment, configuration, networking, backup and update guidance.",
+      "chapters": [
         {
-          "id": "finding-your-way-around",
-          "title": "Finding your way around"
+          "id": "doc-deployment-readme",
+          "title": "TinyMRP deployment",
+          "sections": [
+            {
+              "id": "doc-deployment-readme--what-tinymrp-actually-needs",
+              "title": "What TinyMRP actually needs"
+            },
+            {
+              "id": "doc-deployment-readme--pick-a-path",
+              "title": "Pick a path"
+            },
+            {
+              "id": "doc-deployment-readme--one-script-per-variant",
+              "title": "One script per variant"
+            },
+            {
+              "id": "doc-deployment-readme--then",
+              "title": "Then"
+            },
+            {
+              "id": "doc-deployment-readme--diagnostics",
+              "title": "Diagnostics"
+            },
+            {
+              "id": "doc-deployment-readme--the-60-second-version",
+              "title": "The 60-second version"
+            }
+          ],
+          "source": "docs/deployment/README.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/deployment/README.md"
         },
         {
-          "id": "home-and-notifications",
-          "title": "Home and notifications"
+          "id": "doc-deployment-01-vm-docker",
+          "title": "01 \u2014 TinyMRP on a VM or server with Docker",
+          "sections": [
+            {
+              "id": "doc-deployment-01-vm-docker--what-you-get",
+              "title": "What you get"
+            },
+            {
+              "id": "doc-deployment-01-vm-docker--requirements",
+              "title": "Requirements"
+            },
+            {
+              "id": "doc-deployment-01-vm-docker--step-1-prepare-the-vm",
+              "title": "Step 1 \u2014 Prepare the VM"
+            },
+            {
+              "id": "doc-deployment-01-vm-docker--step-2-install-docker",
+              "title": "Step 2 \u2014 Install Docker"
+            },
+            {
+              "id": "doc-deployment-01-vm-docker--step-3-get-tinymrp",
+              "title": "Step 3 \u2014 Get TinyMRP"
+            },
+            {
+              "id": "doc-deployment-01-vm-docker--step-4-choose-an-access-mode",
+              "title": "Step 4 \u2014 Choose an access mode"
+            },
+            {
+              "id": "doc-deployment-01-vm-docker--step-5-run-the-installer",
+              "title": "Step 5 \u2014 Run the installer"
+            },
+            {
+              "id": "doc-deployment-01-vm-docker--step-6-open-the-firewall",
+              "title": "Step 6 \u2014 Open the firewall"
+            },
+            {
+              "id": "doc-deployment-01-vm-docker--step-7-first-login-and-sample-data",
+              "title": "Step 7 \u2014 First login and sample data"
+            },
+            {
+              "id": "doc-deployment-01-vm-docker--step-8-start-on-boot",
+              "title": "Step 8 \u2014 Start on boot"
+            },
+            {
+              "id": "doc-deployment-01-vm-docker--everything-the-installer-asks-and-accepts",
+              "title": "Everything the installer asks and accepts"
+            },
+            {
+              "id": "doc-deployment-01-vm-docker--everything-the-installer-writes",
+              "title": "Everything the installer writes"
+            },
+            {
+              "id": "doc-deployment-01-vm-docker--day-to-day-commands",
+              "title": "Day-to-day commands"
+            },
+            {
+              "id": "doc-deployment-01-vm-docker--customising-the-deployment",
+              "title": "Customising the deployment"
+            },
+            {
+              "id": "doc-deployment-01-vm-docker--unattended-installs",
+              "title": "Unattended installs"
+            },
+            {
+              "id": "doc-deployment-01-vm-docker--windows-docker-desktop",
+              "title": "Windows Docker Desktop"
+            },
+            {
+              "id": "doc-deployment-01-vm-docker--if-something-goes-wrong",
+              "title": "If something goes wrong"
+            }
+          ],
+          "source": "docs/deployment/01-vm-docker.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/deployment/01-vm-docker.md"
         },
         {
-          "id": "inventory",
-          "title": "Inventory"
+          "id": "doc-deployment-02-linux-bare-metal",
+          "title": "02 \u2014 TinyMRP on Linux without Docker",
+          "sections": [
+            {
+              "id": "doc-deployment-02-linux-bare-metal--what-gets-installed-where",
+              "title": "What gets installed where"
+            },
+            {
+              "id": "doc-deployment-02-linux-bare-metal--requirements",
+              "title": "Requirements"
+            },
+            {
+              "id": "doc-deployment-02-linux-bare-metal--guided-install",
+              "title": "Guided install"
+            },
+            {
+              "id": "doc-deployment-02-linux-bare-metal--install-options",
+              "title": "Install options"
+            },
+            {
+              "id": "doc-deployment-02-linux-bare-metal--manual-install",
+              "title": "Manual install"
+            },
+            {
+              "id": "doc-deployment-02-linux-bare-metal--verify",
+              "title": "Verify"
+            },
+            {
+              "id": "doc-deployment-02-linux-bare-metal--first-login-and-sample-data",
+              "title": "First login and sample data"
+            },
+            {
+              "id": "doc-deployment-02-linux-bare-metal--operating-the-service",
+              "title": "Operating the service"
+            },
+            {
+              "id": "doc-deployment-02-linux-bare-metal--updating",
+              "title": "Updating"
+            },
+            {
+              "id": "doc-deployment-02-linux-bare-metal--backups",
+              "title": "Backups"
+            },
+            {
+              "id": "doc-deployment-02-linux-bare-metal--customising",
+              "title": "Customising"
+            }
+          ],
+          "source": "docs/deployment/02-linux-bare-metal.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/deployment/02-linux-bare-metal.md"
         },
         {
-          "id": "part-details",
-          "title": "Part Details"
+          "id": "doc-deployment-03-windows-lan",
+          "title": "03 \u2014 TinyMRP on Windows, LAN only",
+          "sections": [],
+          "source": "docs/deployment/03-windows-lan.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/deployment/03-windows-lan.md"
         },
         {
-          "id": "doc-packs",
-          "title": "Doc Packs"
+          "id": "doc-deployment-03-windows-lan--a-docker-desktop",
+          "title": "A. Docker Desktop",
+          "sections": [],
+          "source": "docs/deployment/03-windows-lan.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/deployment/03-windows-lan.md"
         },
         {
-          "id": "bom-view",
-          "title": "BOM view"
+          "id": "doc-deployment-03-windows-lan--b-native-windows-service",
+          "title": "B. Native Windows service",
+          "sections": [
+            {
+              "id": "doc-deployment-03-windows-lan--what-you-will-build",
+              "title": "What you will build"
+            },
+            {
+              "id": "doc-deployment-03-windows-lan--downloads",
+              "title": "Downloads"
+            },
+            {
+              "id": "doc-deployment-03-windows-lan--step-1-install-the-prerequisites",
+              "title": "Step 1 \u2014 Install the prerequisites"
+            },
+            {
+              "id": "doc-deployment-03-windows-lan--step-2-lock-mongodb-to-loopback",
+              "title": "Step 2 \u2014 Lock MongoDB to loopback"
+            },
+            {
+              "id": "doc-deployment-03-windows-lan--step-3-lay-out-the-folders",
+              "title": "Step 3 \u2014 Lay out the folders"
+            },
+            {
+              "id": "doc-deployment-03-windows-lan--step-4-create-the-virtualenv",
+              "title": "Step 4 \u2014 Create the virtualenv"
+            },
+            {
+              "id": "doc-deployment-03-windows-lan--step-5-write-the-configuration",
+              "title": "Step 5 \u2014 Write the configuration"
+            },
+            {
+              "id": "doc-deployment-03-windows-lan--step-6-configure-nginx",
+              "title": "Step 6 \u2014 Configure nginx"
+            },
+            {
+              "id": "doc-deployment-03-windows-lan--step-7-install-the-tinymrp-service",
+              "title": "Step 7 \u2014 Install the TinyMRP service"
+            },
+            {
+              "id": "doc-deployment-03-windows-lan--step-8-apply-the-firewall-policy",
+              "title": "Step 8 \u2014 Apply the firewall policy"
+            },
+            {
+              "id": "doc-deployment-03-windows-lan--step-9-create-the-administrator-and-load-sample-data",
+              "title": "Step 9 \u2014 Create the administrator and load sample data"
+            },
+            {
+              "id": "doc-deployment-03-windows-lan--before-you-blame-the-network-run-the-diagnostic",
+              "title": "Before you blame the network: run the diagnostic"
+            },
+            {
+              "id": "doc-deployment-03-windows-lan--step-10-test-from-another-pc",
+              "title": "Step 10 \u2014 Test from another PC"
+            },
+            {
+              "id": "doc-deployment-03-windows-lan--running-nginx-as-a-service",
+              "title": "Running nginx as a service"
+            },
+            {
+              "id": "doc-deployment-03-windows-lan--operating-it",
+              "title": "Operating it"
+            },
+            {
+              "id": "doc-deployment-03-windows-lan--updating",
+              "title": "Updating"
+            },
+            {
+              "id": "doc-deployment-03-windows-lan--backups",
+              "title": "Backups"
+            },
+            {
+              "id": "doc-deployment-03-windows-lan--common-errors",
+              "title": "Common errors"
+            }
+          ],
+          "source": "docs/deployment/03-windows-lan.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/deployment/03-windows-lan.md"
         },
         {
-          "id": "dashboard",
-          "title": "Dashboard"
+          "id": "doc-deployment-04-vps-multi-instance",
+          "title": "04 \u2014 VPS with several instances and automatic HTTPS",
+          "sections": [
+            {
+              "id": "doc-deployment-04-vps-multi-instance--architecture",
+              "title": "Architecture"
+            },
+            {
+              "id": "doc-deployment-04-vps-multi-instance--nextcloud-is-optional",
+              "title": "Nextcloud is optional"
+            },
+            {
+              "id": "doc-deployment-04-vps-multi-instance--requirements",
+              "title": "Requirements"
+            },
+            {
+              "id": "doc-deployment-04-vps-multi-instance--step-1-install-the-host-services",
+              "title": "Step 1 \u2014 Install the host services"
+            },
+            {
+              "id": "doc-deployment-04-vps-multi-instance--step-2-create-an-instance",
+              "title": "Step 2 \u2014 Create an instance"
+            },
+            {
+              "id": "doc-deployment-04-vps-multi-instance--local-vm-instances-without-a-public-domain",
+              "title": "Local VM instances without a public domain"
+            },
+            {
+              "id": "doc-deployment-04-vps-multi-instance--step-3-verify",
+              "title": "Step 3 \u2014 Verify"
+            },
+            {
+              "id": "doc-deployment-04-vps-multi-instance--adding-more-instances",
+              "title": "Adding more instances"
+            },
+            {
+              "id": "doc-deployment-04-vps-multi-instance--what-is-written-where",
+              "title": "What is written where"
+            },
+            {
+              "id": "doc-deployment-04-vps-multi-instance--operations",
+              "title": "Operations"
+            },
+            {
+              "id": "doc-deployment-04-vps-multi-instance--capacity",
+              "title": "Capacity"
+            },
+            {
+              "id": "doc-deployment-04-vps-multi-instance--troubleshooting",
+              "title": "Troubleshooting"
+            }
+          ],
+          "source": "docs/deployment/04-vps-multi-instance.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/deployment/04-vps-multi-instance.md"
         },
         {
-          "id": "import",
-          "title": "Import"
+          "id": "doc-deployment-05-configuration-reference",
+          "title": "05 \u2014 Configuration reference",
+          "sections": [
+            {
+              "id": "doc-deployment-05-configuration-reference--contents",
+              "title": "Contents"
+            },
+            {
+              "id": "doc-deployment-05-configuration-reference--the-three-that-matter",
+              "title": "The three that matter"
+            },
+            {
+              "id": "doc-deployment-05-configuration-reference--addressing-cookies-and-tls",
+              "title": "Addressing, cookies and TLS"
+            },
+            {
+              "id": "doc-deployment-05-configuration-reference--secrets",
+              "title": "Secrets"
+            },
+            {
+              "id": "doc-deployment-05-configuration-reference--database",
+              "title": "Database"
+            },
+            {
+              "id": "doc-deployment-05-configuration-reference--files-and-storage",
+              "title": "Files and storage"
+            },
+            {
+              "id": "doc-deployment-05-configuration-reference--uploads",
+              "title": "Uploads"
+            },
+            {
+              "id": "doc-deployment-05-configuration-reference--authentication-and-sessions",
+              "title": "Authentication and sessions"
+            },
+            {
+              "id": "doc-deployment-05-configuration-reference--rate-limiting",
+              "title": "Rate limiting"
+            },
+            {
+              "id": "doc-deployment-05-configuration-reference--content-security-policy",
+              "title": "Content Security Policy"
+            },
+            {
+              "id": "doc-deployment-05-configuration-reference--logging-and-diagnostics",
+              "title": "Logging and diagnostics"
+            },
+            {
+              "id": "doc-deployment-05-configuration-reference--data-model-and-presentation",
+              "title": "Data model and presentation"
+            },
+            {
+              "id": "doc-deployment-05-configuration-reference--development-only",
+              "title": "Development only"
+            },
+            {
+              "id": "doc-deployment-05-configuration-reference--first-run-seeding",
+              "title": "First-run seeding"
+            },
+            {
+              "id": "doc-deployment-05-configuration-reference--removed-settings",
+              "title": "Removed settings"
+            }
+          ],
+          "source": "docs/deployment/05-configuration-reference.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/deployment/05-configuration-reference.md"
         },
         {
-          "id": "jobs-and-orders",
-          "title": "Jobs and Orders"
+          "id": "doc-deployment-06-first-run",
+          "title": "06 \u2014 First run: administrator, roles, and sample data",
+          "sections": [
+            {
+              "id": "doc-deployment-06-first-run--what-a-fresh-install-contains",
+              "title": "What a fresh install contains"
+            },
+            {
+              "id": "doc-deployment-06-first-run--the-first-administrator",
+              "title": "The first administrator"
+            },
+            {
+              "id": "doc-deployment-06-first-run--the-standard-roles",
+              "title": "The standard roles"
+            },
+            {
+              "id": "doc-deployment-06-first-run--loading-the-evaluation-dataset",
+              "title": "Loading the evaluation dataset"
+            },
+            {
+              "id": "doc-deployment-06-first-run--what-the-dataset-gives-you",
+              "title": "What the dataset gives you"
+            },
+            {
+              "id": "doc-deployment-06-first-run--removing-the-demo-accounts",
+              "title": "Removing the demo accounts"
+            },
+            {
+              "id": "doc-deployment-06-first-run--creating-real-users",
+              "title": "Creating real users"
+            },
+            {
+              "id": "doc-deployment-06-first-run--connecting-the-solidworks-add-in",
+              "title": "Connecting the SolidWorks add-in"
+            },
+            {
+              "id": "doc-deployment-06-first-run--a-five-minute-acceptance-test",
+              "title": "A five-minute acceptance test"
+            },
+            {
+              "id": "doc-deployment-06-first-run--command-reference",
+              "title": "Command reference"
+            }
+          ],
+          "source": "docs/deployment/06-first-run.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/deployment/06-first-run.md"
         },
         {
-          "id": "tokens",
-          "title": "Tokens"
+          "id": "doc-deployment-07-troubleshooting",
+          "title": "07 \u2014 Troubleshooting",
+          "sections": [
+            {
+              "id": "doc-deployment-07-troubleshooting--where-to-look-first",
+              "title": "Where to look first"
+            },
+            {
+              "id": "doc-deployment-07-troubleshooting--login-and-sessions",
+              "title": "Login and sessions"
+            },
+            {
+              "id": "doc-deployment-07-troubleshooting--startup-failures",
+              "title": "Startup failures"
+            },
+            {
+              "id": "doc-deployment-07-troubleshooting--files-thumbnails-and-uploads",
+              "title": "Files, thumbnails and uploads"
+            },
+            {
+              "id": "doc-deployment-07-troubleshooting--network-and-access",
+              "title": "Network and access"
+            },
+            {
+              "id": "doc-deployment-07-troubleshooting--database",
+              "title": "Database"
+            },
+            {
+              "id": "doc-deployment-07-troubleshooting--performance",
+              "title": "Performance"
+            },
+            {
+              "id": "doc-deployment-07-troubleshooting--solidworks-add-in",
+              "title": "SolidWorks add-in"
+            },
+            {
+              "id": "doc-deployment-07-troubleshooting--collecting-a-support-bundle",
+              "title": "Collecting a support bundle"
+            }
+          ],
+          "source": "docs/deployment/07-troubleshooting.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/deployment/07-troubleshooting.md"
         },
         {
-          "id": "tools",
-          "title": "Tools"
+          "id": "doc-deployment-08-networking-and-tls",
+          "title": "08 \u2014 Networking, addresses and TLS",
+          "sections": [
+            {
+              "id": "doc-deployment-08-networking-and-tls--the-one-rule",
+              "title": "The one rule"
+            },
+            {
+              "id": "doc-deployment-08-networking-and-tls--why-the-scheme-matters",
+              "title": "Why the scheme matters"
+            },
+            {
+              "id": "doc-deployment-08-networking-and-tls--why-localhost-kept-working-when-the-lan-did-not",
+              "title": "Why localhost kept working when the LAN did not"
+            },
+            {
+              "id": "doc-deployment-08-networking-and-tls--reverse-proxies-and-forwarded-headers",
+              "title": "Reverse proxies and forwarded headers"
+            },
+            {
+              "id": "doc-deployment-08-networking-and-tls--ports-used-by-each-deployment",
+              "title": "Ports used by each deployment"
+            },
+            {
+              "id": "doc-deployment-08-networking-and-tls--firewall-recipes",
+              "title": "Firewall recipes"
+            },
+            {
+              "id": "doc-deployment-08-networking-and-tls--adding-https-to-a-lan-deployment",
+              "title": "Adding HTTPS to a LAN deployment"
+            },
+            {
+              "id": "doc-deployment-08-networking-and-tls--naming-a-lan-host",
+              "title": "Naming a LAN host"
+            },
+            {
+              "id": "doc-deployment-08-networking-and-tls--verifying-a-deployment-from-another-machine",
+              "title": "Verifying a deployment from another machine"
+            }
+          ],
+          "source": "docs/deployment/08-networking-and-tls.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/deployment/08-networking-and-tls.md"
         },
         {
-          "id": "admin",
-          "title": "Admin"
+          "id": "doc-deployment-09-local-development",
+          "title": "09 \u2014 Local development",
+          "sections": [
+            {
+              "id": "doc-deployment-09-local-development--prerequisites",
+              "title": "Prerequisites"
+            },
+            {
+              "id": "doc-deployment-09-local-development--setup",
+              "title": "Setup"
+            },
+            {
+              "id": "doc-deployment-09-local-development--running",
+              "title": "Running"
+            },
+            {
+              "id": "doc-deployment-09-local-development--reaching-a-dev-instance-from-another-machine",
+              "title": "Reaching a dev instance from another machine"
+            },
+            {
+              "id": "doc-deployment-09-local-development--frontend-development",
+              "title": "Frontend development"
+            },
+            {
+              "id": "doc-deployment-09-local-development--sample-data",
+              "title": "Sample data"
+            },
+            {
+              "id": "doc-deployment-09-local-development--tests",
+              "title": "Tests"
+            },
+            {
+              "id": "doc-deployment-09-local-development--serving-deliverables-in-development",
+              "title": "Serving deliverables in development"
+            }
+          ],
+          "source": "docs/deployment/09-local-development.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/deployment/09-local-development.md"
+        },
+        {
+          "id": "doc-deployment-10-operations",
+          "title": "10 \u2014 Backups, updates and uninstall",
+          "sections": [
+            {
+              "id": "doc-deployment-10-operations--what-a-complete-backup-contains",
+              "title": "What a complete backup contains"
+            },
+            {
+              "id": "doc-deployment-10-operations--container-stack-deploycommunity",
+              "title": "Container stack (`deploy/community`)"
+            },
+            {
+              "id": "doc-deployment-10-operations--vps-multi-instance",
+              "title": "VPS multi-instance"
+            },
+            {
+              "id": "doc-deployment-10-operations--linux-bare-metal",
+              "title": "Linux bare metal"
+            },
+            {
+              "id": "doc-deployment-10-operations--windows-service",
+              "title": "Windows service"
+            },
+            {
+              "id": "doc-deployment-10-operations--restore-drills",
+              "title": "Restore drills"
+            },
+            {
+              "id": "doc-deployment-10-operations--monitoring",
+              "title": "Monitoring"
+            },
+            {
+              "id": "doc-deployment-10-operations--moving-an-instance-to-another-host",
+              "title": "Moving an instance to another host"
+            }
+          ],
+          "source": "docs/deployment/10-operations.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/deployment/10-operations.md"
+        },
+        {
+          "id": "doc-deployment-11-faq",
+          "title": "11 \u2014 Deployment FAQ",
+          "sections": [
+            {
+              "id": "doc-deployment-11-faq--choosing-a-deployment",
+              "title": "Choosing a deployment"
+            },
+            {
+              "id": "doc-deployment-11-faq--configuration",
+              "title": "Configuration"
+            },
+            {
+              "id": "doc-deployment-11-faq--installing",
+              "title": "Installing"
+            },
+            {
+              "id": "doc-deployment-11-faq--first-login-users-and-demo-data",
+              "title": "First login, users and demo data"
+            },
+            {
+              "id": "doc-deployment-11-faq--other-machines-cannot-reach-it",
+              "title": "Other machines cannot reach it"
+            },
+            {
+              "id": "doc-deployment-11-faq--https-and-certificates",
+              "title": "HTTPS and certificates"
+            },
+            {
+              "id": "doc-deployment-11-faq--files-and-storage",
+              "title": "Files and storage"
+            },
+            {
+              "id": "doc-deployment-11-faq--shell-and-platform-gotchas",
+              "title": "Shell and platform gotchas"
+            },
+            {
+              "id": "doc-deployment-11-faq--operations",
+              "title": "Operations"
+            },
+            {
+              "id": "doc-deployment-11-faq--security-posture",
+              "title": "Security posture"
+            },
+            {
+              "id": "doc-deployment-11-faq--solidworks-add-in",
+              "title": "SolidWorks add-in"
+            }
+          ],
+          "source": "docs/deployment/11-faq.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/deployment/11-faq.md"
+        },
+        {
+          "id": "doc-deployment-12-restricted-windows-flask",
+          "title": "12 \u2014 Windows, restricted environment, `python run.py`",
+          "sections": [
+            {
+              "id": "doc-deployment-12-restricted-windows-flask--will-my-existing-instance-break-read-this-first",
+              "title": "Will my existing instance break? Read this first"
+            },
+            {
+              "id": "doc-deployment-12-restricted-windows-flask--what-you-run",
+              "title": "What you run"
+            },
+            {
+              "id": "doc-deployment-12-restricted-windows-flask--step-1-preflight",
+              "title": "Step 1 \u2014 Preflight"
+            },
+            {
+              "id": "doc-deployment-12-restricted-windows-flask--step-2-the-environment-file",
+              "title": "Step 2 \u2014 The environment file"
+            },
+            {
+              "id": "doc-deployment-12-restricted-windows-flask--step-3-start-it",
+              "title": "Step 3 \u2014 Start it"
+            },
+            {
+              "id": "doc-deployment-12-restricted-windows-flask--step-4-administrator-and-sample-data",
+              "title": "Step 4 \u2014 Administrator and sample data"
+            },
+            {
+              "id": "doc-deployment-12-restricted-windows-flask--step-5-let-other-machines-in",
+              "title": "Step 5 \u2014 Let other machines in"
+            },
+            {
+              "id": "doc-deployment-12-restricted-windows-flask--step-6-start-automatically",
+              "title": "Step 6 \u2014 Start automatically"
+            },
+            {
+              "id": "doc-deployment-12-restricted-windows-flask--updating-an-existing-instance",
+              "title": "Updating an existing instance"
+            },
+            {
+              "id": "doc-deployment-12-restricted-windows-flask--every-setting-runpy-reads",
+              "title": "Every setting `run.py` reads"
+            },
+            {
+              "id": "doc-deployment-12-restricted-windows-flask--security-of-this-variant",
+              "title": "Security of this variant"
+            },
+            {
+              "id": "doc-deployment-12-restricted-windows-flask--copy-paste-command-sheet",
+              "title": "Copy-paste command sheet"
+            }
+          ],
+          "source": "docs/deployment/12-restricted-windows-flask.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/deployment/12-restricted-windows-flask.md"
+        },
+        {
+          "id": "doc-help-06bserverinstallation",
+          "title": "Installing and running the server",
+          "sections": [
+            {
+              "id": "doc-help-06bserverinstallation--which-guide",
+              "title": "Which guide"
+            },
+            {
+              "id": "doc-help-06bserverinstallation--then-whichever-path-you-took",
+              "title": "Then, whichever path you took"
+            },
+            {
+              "id": "doc-help-06bserverinstallation--the-recommended-path-in-brief",
+              "title": "The recommended path in brief"
+            },
+            {
+              "id": "doc-help-06bserverinstallation--every-deployment-script-and-its-options",
+              "title": "Every deployment script and its options"
+            },
+            {
+              "id": "doc-help-06bserverinstallation--every-configuration-variable",
+              "title": "Every configuration variable"
+            }
+          ],
+          "source": "docs/help/06b_server_installation.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/help/06b_server_installation.md"
         }
       ]
     },
     {
-      "id": "import-what-each-choice-does",
-      "title": "Import: what each choice does",
-      "sections": [
+      "id": "security-governance",
+      "title": "Security & governance",
+      "description": "Security policy, access intent, dependency triage and risk controls.",
+      "chapters": [
         {
-          "id": "the-two-choices-2",
-          "title": "The two choices"
+          "id": "doc-security-cspinlineburndown",
+          "title": "CSP `unsafe-inline` burn-down",
+          "sections": [
+            {
+              "id": "doc-security-cspinlineburndown--position",
+              "title": "Position"
+            },
+            {
+              "id": "doc-security-cspinlineburndown--what-this-change-adds",
+              "title": "What this change adds"
+            },
+            {
+              "id": "doc-security-cspinlineburndown--current-inline-surface",
+              "title": "Current inline surface"
+            },
+            {
+              "id": "doc-security-cspinlineburndown--suggested-sequence",
+              "title": "Suggested sequence"
+            },
+            {
+              "id": "doc-security-cspinlineburndown--verification",
+              "title": "Verification"
+            },
+            {
+              "id": "doc-security-cspinlineburndown--not-done",
+              "title": "Not done"
+            }
+          ],
+          "source": "docs/security/csp_inline_burndown.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/security/csp_inline_burndown.md"
         },
         {
-          "id": "overwrite-means-the-pack-wins-outright",
-          "title": "\u201cOverwrite\u201d means the pack wins outright"
+          "id": "doc-security-dependencyadvisorytriage",
+          "title": "Dependency advisory triage",
+          "sections": [
+            {
+              "id": "doc-security-dependencyadvisorytriage--how-this-was-produced",
+              "title": "How this was produced"
+            },
+            {
+              "id": "doc-security-dependencyadvisorytriage--summary",
+              "title": "Summary"
+            },
+            {
+              "id": "doc-security-dependencyadvisorytriage--1-pillow-1130-1230-remediated",
+              "title": "1. Pillow 11.3.0 \u2192 12.3.0 \u2014 REMEDIATED"
+            },
+            {
+              "id": "doc-security-dependencyadvisorytriage--2-cryptography-4301-4801-remediated",
+              "title": "2. cryptography 43.0.1 \u2192 48.0.1 \u2014 REMEDIATED"
+            },
+            {
+              "id": "doc-security-dependencyadvisorytriage--3-gunicorn-2120-2200-remediated",
+              "title": "3. gunicorn 21.2.0 \u2192 22.0.0 \u2014 REMEDIATED"
+            },
+            {
+              "id": "doc-security-dependencyadvisorytriage--4-pypdf2-301-1-advisory-remediated",
+              "title": "4. PyPDF2 3.0.1 \u2014 1 advisory \u2014 REMEDIATED"
+            },
+            {
+              "id": "doc-security-dependencyadvisorytriage--5-flask-security-too-581-1-advisory-not-applicable",
+              "title": "5. Flask-Security-Too 5.8.1 \u2014 1 advisory \u2014 NOT APPLICABLE"
+            },
+            {
+              "id": "doc-security-dependencyadvisorytriage--6-react-router-react-router-dom-2-high-entries-not-applicable",
+              "title": "6. react-router / react-router-dom \u2014 2 high entries \u2014 NOT APPLICABLE"
+            },
+            {
+              "id": "doc-security-dependencyadvisorytriage--recommended-phase-3b-sequencing",
+              "title": "Recommended Phase 3B sequencing"
+            },
+            {
+              "id": "doc-security-dependencyadvisorytriage--re-check-triggers",
+              "title": "Re-check triggers"
+            }
+          ],
+          "source": "docs/security/dependency_advisory_triage.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/security/dependency_advisory_triage.md"
         },
         {
-          "id": "what-counts-as-approved",
-          "title": "What counts as approved"
+          "id": "doc-security-riskacceptancetemplate",
+          "title": "Vulnerability-gate exception / risk acceptance",
+          "sections": [
+            {
+              "id": "doc-security-riskacceptancetemplate--rules",
+              "title": "Rules"
+            },
+            {
+              "id": "doc-security-riskacceptancetemplate--record-format",
+              "title": "Record format"
+            },
+            {
+              "id": "doc-security-riskacceptancetemplate--active-exceptions",
+              "title": "Active exceptions"
+            },
+            {
+              "id": "doc-security-riskacceptancetemplate--remediation-status-do-not-create-exceptions-for-these",
+              "title": "Remediation status \u2014 do not create exceptions for these"
+            }
+          ],
+          "source": "docs/security/risk_acceptance_template.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/security/risk_acceptance_template.md"
         },
         {
-          "id": "properties",
-          "title": "Properties"
+          "id": "doc-security-roleintentfeaturematrix",
+          "title": "Standard role intent and feature wiring",
+          "sections": [
+            {
+              "id": "doc-security-roleintentfeaturematrix--role-guide",
+              "title": "Role guide"
+            },
+            {
+              "id": "doc-security-roleintentfeaturematrix--active-capability-map",
+              "title": "Active capability map"
+            },
+            {
+              "id": "doc-security-roleintentfeaturematrix--adding-a-scoped-role",
+              "title": "Adding a scoped role"
+            }
+          ],
+          "source": "docs/security/role_intent_feature_matrix.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/security/role_intent_feature_matrix.md"
         },
         {
-          "id": "bom",
-          "title": "BOM"
+          "id": "doc-security-supplychainpolicy",
+          "title": "Supply-chain pin and release-gate policy",
+          "sections": [
+            {
+              "id": "doc-security-supplychainpolicy--immutable-defaults",
+              "title": "Immutable defaults"
+            },
+            {
+              "id": "doc-security-supplychainpolicy--updating-a-pin",
+              "title": "Updating a pin"
+            },
+            {
+              "id": "doc-security-supplychainpolicy--evidence-and-blocking-behavior",
+              "title": "Evidence and blocking behavior"
+            },
+            {
+              "id": "doc-security-supplychainpolicy--residual-reproducibility-limits",
+              "title": "Residual reproducibility limits"
+            }
+          ],
+          "source": "docs/security/supply_chain_policy.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/security/supply_chain_policy.md"
         },
         {
-          "id": "files",
-          "title": "Files"
-        },
-        {
-          "id": "who-can-do-what",
-          "title": "Who can do what"
-        },
-        {
-          "id": "reading-the-result",
-          "title": "Reading the result"
-        },
-        {
-          "id": "guided-exercise-with-real-test-packs",
-          "title": "Guided exercise with real test packs"
-        },
-        {
-          "id": "import-faq",
-          "title": "Import FAQ"
+          "id": "doc-security",
+          "title": "Security Policy",
+          "sections": [
+            {
+              "id": "doc-security--reporting",
+              "title": "Reporting"
+            },
+            {
+              "id": "doc-security--threat-model-high-level",
+              "title": "Threat Model (high-level)"
+            },
+            {
+              "id": "doc-security--security-model",
+              "title": "Security Model"
+            },
+            {
+              "id": "doc-security--phase-1-controls-rate-limits-token-expiry-2fa-logging",
+              "title": "Phase 1 Controls (rate limits, token expiry, 2FA, logging)"
+            },
+            {
+              "id": "doc-security--incident-response-notes",
+              "title": "Incident Response Notes"
+            }
+          ],
+          "source": "SECURITY.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/SECURITY.md"
         }
       ]
     },
     {
-      "id": "roles-and-permissions",
-      "title": "Roles and Permissions",
-      "sections": [
+      "id": "product-support",
+      "title": "Product & support",
+      "description": "Product scope, retention, support and disclosure policies.",
+      "chapters": [
         {
-          "id": "how-access-is-decided",
-          "title": "How access is decided"
+          "id": "doc-commercial-productscope",
+          "title": "What TinyMRP is, and what it is not",
+          "sections": [
+            {
+              "id": "doc-commercial-productscope--in-one-sentence",
+              "title": "In one sentence"
+            },
+            {
+              "id": "doc-commercial-productscope--the-honest-framing-of-the-name",
+              "title": "The honest framing of the name"
+            },
+            {
+              "id": "doc-commercial-productscope--what-it-does",
+              "title": "What it does"
+            },
+            {
+              "id": "doc-commercial-productscope--what-it-does-not-do",
+              "title": "What it does not do"
+            },
+            {
+              "id": "doc-commercial-productscope--who-it-is-for",
+              "title": "Who it is for"
+            },
+            {
+              "id": "doc-commercial-productscope--who-it-is-not-for",
+              "title": "Who it is not for"
+            },
+            {
+              "id": "doc-commercial-productscope--licence",
+              "title": "Licence"
+            }
+          ],
+          "source": "docs/commercial/PRODUCT_SCOPE.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/commercial/PRODUCT_SCOPE.md"
         },
         {
-          "id": "the-standard-roles",
-          "title": "The standard roles"
+          "id": "doc-commercial-retentionanddeletion",
+          "title": "Data retention and deletion \u2014 DRAFT",
+          "sections": [
+            {
+              "id": "doc-commercial-retentionanddeletion--what-tinymrp-stores",
+              "title": "What TinyMRP stores"
+            },
+            {
+              "id": "doc-commercial-retentionanddeletion--retention",
+              "title": "Retention"
+            },
+            {
+              "id": "doc-commercial-retentionanddeletion--deletion",
+              "title": "Deletion"
+            },
+            {
+              "id": "doc-commercial-retentionanddeletion--known-gaps-as-of-2026-08-07",
+              "title": "Known gaps as of 2026-08-07"
+            }
+          ],
+          "source": "docs/commercial/RETENTION_AND_DELETION.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/commercial/RETENTION_AND_DELETION.md"
         },
         {
-          "id": "the-rules-that-surprise-people",
-          "title": "The rules that surprise people"
+          "id": "doc-commercial-securitydisclosure",
+          "title": "Reporting a security issue",
+          "sections": [
+            {
+              "id": "doc-commercial-securitydisclosure--how-to-reach-us",
+              "title": "How to reach us"
+            },
+            {
+              "id": "doc-commercial-securitydisclosure--what-to-expect",
+              "title": "What to expect"
+            },
+            {
+              "id": "doc-commercial-securitydisclosure--scope",
+              "title": "Scope"
+            },
+            {
+              "id": "doc-commercial-securitydisclosure--safe-harbour",
+              "title": "Safe harbour"
+            },
+            {
+              "id": "doc-commercial-securitydisclosure--credit",
+              "title": "Credit"
+            },
+            {
+              "id": "doc-commercial-securitydisclosure--a-note-on-the-licence",
+              "title": "A note on the licence"
+            }
+          ],
+          "source": "docs/commercial/SECURITY_DISCLOSURE.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/commercial/SECURITY_DISCLOSURE.md"
         },
         {
-          "id": "when-something-is-refused",
-          "title": "When something is refused"
-        },
-        {
-          "id": "for-administrators",
-          "title": "For administrators"
+          "id": "doc-commercial-serviceandsupport",
+          "title": "Service and support agreement \u2014 DRAFT, NOT LEGAL ADVICE",
+          "sections": [
+            {
+              "id": "doc-commercial-serviceandsupport--why-this-is-not-a-eula",
+              "title": "Why this is not a EULA"
+            },
+            {
+              "id": "doc-commercial-serviceandsupport--1-parties-and-scope",
+              "title": "1. Parties and scope"
+            },
+            {
+              "id": "doc-commercial-serviceandsupport--2-what-the-software-does",
+              "title": "2. What the software does"
+            },
+            {
+              "id": "doc-commercial-serviceandsupport--3-services-provided",
+              "title": "3. Services provided"
+            },
+            {
+              "id": "doc-commercial-serviceandsupport--4-support",
+              "title": "4. Support"
+            },
+            {
+              "id": "doc-commercial-serviceandsupport--5-availability",
+              "title": "5. Availability"
+            },
+            {
+              "id": "doc-commercial-serviceandsupport--6-customer-data",
+              "title": "6. Customer data"
+            },
+            {
+              "id": "doc-commercial-serviceandsupport--7-confidentiality",
+              "title": "7. Confidentiality"
+            },
+            {
+              "id": "doc-commercial-serviceandsupport--8-warranties-and-liability",
+              "title": "8. Warranties and liability"
+            },
+            {
+              "id": "doc-commercial-serviceandsupport--9-term-and-termination",
+              "title": "9. Term and termination"
+            },
+            {
+              "id": "doc-commercial-serviceandsupport--10-security",
+              "title": "10. Security"
+            },
+            {
+              "id": "doc-commercial-serviceandsupport--schedule-a-instances-covered",
+              "title": "Schedule A \u2014 instances covered"
+            },
+            {
+              "id": "doc-commercial-serviceandsupport--open-items-before-this-can-be-used",
+              "title": "Open items before this can be used"
+            }
+          ],
+          "source": "docs/commercial/SERVICE_AND_SUPPORT.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/commercial/SERVICE_AND_SUPPORT.md"
         }
       ]
     },
     {
-      "id": "installing-the-solidworks-add-in",
-      "title": "Installing the SolidWorks Add-in",
-      "sections": [
+      "id": "engineering-reference",
+      "title": "Engineering & reference",
+      "description": "Architecture, field design, testing and generated technical reference.",
+      "chapters": [
         {
-          "id": "before-you-start",
-          "title": "Before You Start"
+          "id": "doc-readme",
+          "title": "TinyMRP v2",
+          "sections": [
+            {
+              "id": "doc-readme--features",
+              "title": "Features"
+            },
+            {
+              "id": "doc-readme--tech-stack",
+              "title": "Tech Stack"
+            },
+            {
+              "id": "doc-readme--configuration",
+              "title": "Configuration"
+            },
+            {
+              "id": "doc-readme--security-model",
+              "title": "Security Model"
+            },
+            {
+              "id": "doc-readme--admin-settings",
+              "title": "Admin Settings"
+            },
+            {
+              "id": "doc-readme--upload-pack-associated-files",
+              "title": "Upload Pack + Associated Files"
+            },
+            {
+              "id": "doc-readme--help-system",
+              "title": "Help System"
+            },
+            {
+              "id": "doc-readme--solidworks-add-in",
+              "title": "SolidWorks Add-in"
+            },
+            {
+              "id": "doc-readme--part-numbering-api",
+              "title": "Part Numbering API"
+            },
+            {
+              "id": "doc-readme--business-modules-jobs-suppliers-customers-orders",
+              "title": "Business Modules (Jobs, Suppliers, Customers, Orders)"
+            },
+            {
+              "id": "doc-readme--roles-permissions",
+              "title": "Roles & Permissions"
+            },
+            {
+              "id": "doc-readme--quick-start-local-dev",
+              "title": "Quick Start (local dev)"
+            },
+            {
+              "id": "doc-readme--tests-smoke-checks",
+              "title": "Tests & Smoke Checks"
+            },
+            {
+              "id": "doc-readme--deployment",
+              "title": "Deployment"
+            },
+            {
+              "id": "doc-readme--tinymrp-community-standalone-docker",
+              "title": "TinyMRP Community (standalone Docker)"
+            },
+            {
+              "id": "doc-readme--developer-docker-compose",
+              "title": "Developer Docker Compose"
+            },
+            {
+              "id": "doc-readme--guided-multi-instance-vps-ubuntu-caddy",
+              "title": "Guided multi-instance VPS (Ubuntu + Caddy)"
+            },
+            {
+              "id": "doc-readme--frontend-reactvite",
+              "title": "Frontend (React/Vite)"
+            },
+            {
+              "id": "doc-readme--document-packs-api-pdfexcel",
+              "title": "Document Packs API (PDF/Excel)"
+            },
+            {
+              "id": "doc-readme--cli-utilities",
+              "title": "CLI Utilities"
+            },
+            {
+              "id": "doc-readme--notes-tips",
+              "title": "Notes & Tips"
+            },
+            {
+              "id": "doc-readme--license",
+              "title": "License"
+            }
+          ],
+          "source": "README.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/README.md"
         },
         {
-          "id": "get-the-installer",
-          "title": "Get The Installer"
+          "id": "doc-fieldcustomizationdesign",
+          "title": "Field Customization Design",
+          "sections": [
+            {
+              "id": "doc-fieldcustomizationdesign--goal",
+              "title": "Goal"
+            },
+            {
+              "id": "doc-fieldcustomizationdesign--comparison-baseline",
+              "title": "Comparison Baseline"
+            },
+            {
+              "id": "doc-fieldcustomizationdesign--implemented-model",
+              "title": "Implemented Model"
+            },
+            {
+              "id": "doc-fieldcustomizationdesign--export-behavior",
+              "title": "Export Behavior"
+            },
+            {
+              "id": "doc-fieldcustomizationdesign--why-this-shape",
+              "title": "Why This Shape"
+            }
+          ],
+          "source": "docs/field_customization_design.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/field_customization_design.md"
         },
         {
-          "id": "run-the-installer",
-          "title": "Run The Installer"
+          "id": "doc-help-08referenceauto",
+          "title": "Reference",
+          "sections": [
+            {
+              "id": "doc-help-08referenceauto--web-ui-pages-routes",
+              "title": "Web UI pages (routes)"
+            },
+            {
+              "id": "doc-help-08referenceauto--api-endpoints",
+              "title": "API endpoints"
+            },
+            {
+              "id": "doc-help-08referenceauto--environment-variables",
+              "title": "Environment variables"
+            },
+            {
+              "id": "doc-help-08referenceauto--solidworks-add-in-options",
+              "title": "SolidWorks add-in options"
+            },
+            {
+              "id": "doc-help-08referenceauto--solidworks-add-in-tabs",
+              "title": "SolidWorks add-in tabs"
+            }
+          ],
+          "source": "docs/help/08_reference_auto.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/help/08_reference_auto.md"
         },
         {
-          "id": "enable-in-solidworks",
-          "title": "Enable In SolidWorks"
+          "id": "doc-help-contributinghelp",
+          "title": "CONTRIBUTING_HELP",
+          "sections": [
+            {
+              "id": "doc-help-contributinghelp--tone-and-audience",
+              "title": "Tone and audience"
+            },
+            {
+              "id": "doc-help-contributinghelp--structure-rules",
+              "title": "Structure rules"
+            },
+            {
+              "id": "doc-help-contributinghelp--library-sections",
+              "title": "Library sections"
+            },
+            {
+              "id": "doc-help-contributinghelp--contextual-help",
+              "title": "Contextual help"
+            },
+            {
+              "id": "doc-help-contributinghelp--formatting-rules",
+              "title": "Formatting rules"
+            },
+            {
+              "id": "doc-help-contributinghelp--auto-generated-sections",
+              "title": "Auto-generated sections"
+            },
+            {
+              "id": "doc-help-contributinghelp--regenerate-the-help-page",
+              "title": "Regenerate the help page"
+            },
+            {
+              "id": "doc-help-contributinghelp--refresh-screenshots",
+              "title": "Refresh screenshots"
+            }
+          ],
+          "source": "docs/help/CONTRIBUTING_HELP.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/help/CONTRIBUTING_HELP.md"
         },
         {
-          "id": "open-the-task-pane",
-          "title": "Open The Task Pane"
-        },
-        {
-          "id": "first-connection-recommended",
-          "title": "First Connection (Recommended)"
-        },
-        {
-          "id": "where-settings-are-stored",
-          "title": "Where Settings Are Stored"
-        },
-        {
-          "id": "manual-register-repair-if-needed",
-          "title": "Manual Register / Repair (If Needed)"
-        },
-        {
-          "id": "silent-install-it-deployment",
-          "title": "Silent Install (IT Deployment)"
-        }
-      ]
-    },
-    {
-      "id": "using-the-solidworks-add-in",
-      "title": "Using the SolidWorks Add-in",
-      "sections": [
-        {
-          "id": "publishbom-tab",
-          "title": "Publish/BOM Tab"
-        },
-        {
-          "id": "tools-tab",
-          "title": "Tools Tab"
-        },
-        {
-          "id": "numbering-tab",
-          "title": "Numbering Tab"
-        },
-        {
-          "id": "configuration-tab",
-          "title": "Configuration Tab"
-        },
-        {
-          "id": "recommended-daily-flows",
-          "title": "Recommended Daily Flows"
-        }
-      ]
-    },
-    {
-      "id": "common-workflows",
-      "title": "Common Workflows",
-      "sections": [
-        {
-          "id": "workflow-a-cad-to-production-package",
-          "title": "Workflow A: CAD To Production Package"
-        },
-        {
-          "id": "workflow-b-progressive-ordering-across-multi-level-bom",
-          "title": "Workflow B: Progressive Ordering Across Multi-Level BOM"
-        },
-        {
-          "id": "understanding-over-ordered-behavior",
-          "title": "Understanding Over-Ordered Behavior"
-        },
-        {
-          "id": "order-lifecycle-notes",
-          "title": "Order Lifecycle Notes"
-        },
-        {
-          "id": "scope-of-supply-and-customer-deliverables",
-          "title": "Scope Of Supply and Customer Deliverables"
-        },
-        {
-          "id": "iteration-loop-engineering-change",
-          "title": "Iteration Loop (Engineering Change)"
-        }
-      ]
-    },
-    {
-      "id": "configuration",
-      "title": "Configuration",
-      "sections": [
-        {
-          "id": "admin-dashboard-admin",
-          "title": "Admin Dashboard (`/admin`)"
-        },
-        {
-          "id": "app-settings-adminsettings",
-          "title": "App Settings (`/admin/settings`)"
-        },
-        {
-          "id": "users-and-roles",
-          "title": "Users And Roles"
-        },
-        {
-          "id": "fields-and-exports-uiadminfields",
-          "title": "Fields And Exports (`/ui/admin/fields`)"
-        },
-        {
-          "id": "access-scoping-model-operational-view",
-          "title": "Access Scoping Model (Operational View)"
-        },
-        {
-          "id": "customer-and-supplier-master-data",
-          "title": "Customer And Supplier Master Data"
-        },
-        {
-          "id": "jobs-administration-adminjobs",
-          "title": "Jobs Administration (`/admin/jobs`)"
-        },
-        {
-          "id": "orders-administration-adminorders",
-          "title": "Orders Administration (`/admin/orders`)"
-        },
-        {
-          "id": "add-in-admin-uiadminaddin",
-          "title": "Add-in Admin (`/ui/admin/addin`)"
-        },
-        {
-          "id": "upload-pack-housekeeping",
-          "title": "Upload pack housekeeping"
-        },
-        {
-          "id": "backups-adminbackups",
-          "title": "Backups (`/admin/backups`)"
-        },
-        {
-          "id": "audit-and-metrics",
-          "title": "Audit And Metrics"
-        },
-        {
-          "id": "high-risk-operations",
-          "title": "High-Risk Operations"
-        }
-      ]
-    },
-    {
-      "id": "installing-and-running-the-server",
-      "title": "Installing and running the server",
-      "sections": [
-        {
-          "id": "which-guide",
-          "title": "Which guide"
-        },
-        {
-          "id": "then-whichever-path-you-took",
-          "title": "Then, whichever path you took"
-        },
-        {
-          "id": "the-recommended-path-in-brief",
-          "title": "The recommended path in brief"
-        },
-        {
-          "id": "every-deployment-script-and-its-options",
-          "title": "Every deployment script and its options"
-        },
-        {
-          "id": "every-configuration-variable",
-          "title": "Every configuration variable"
-        }
-      ]
-    },
-    {
-      "id": "troubleshooting",
-      "title": "Troubleshooting",
-      "sections": [
-        {
-          "id": "i-cannot-see-a-part-that-i-know-exists",
-          "title": "I cannot see a part that I know exists"
-        },
-        {
-          "id": "the-approved-badge-is-wrong",
-          "title": "The approved badge is wrong"
-        },
-        {
-          "id": "files-are-missing-from-a-part",
-          "title": "Files are missing from a part"
-        },
-        {
-          "id": "the-import-created-parts-i-did-not-expect",
-          "title": "The import created parts I did not expect"
-        },
-        {
-          "id": "the-import-did-nothing-did-too-much",
-          "title": "The import did nothing / did too much"
-        },
-        {
-          "id": "an-import-says-i-lack-permission",
-          "title": "An import says I lack permission"
-        },
-        {
-          "id": "a-doc-pack-is-missing-sections",
-          "title": "A Doc Pack is missing sections"
-        },
-        {
-          "id": "a-doc-pack-is-taking-a-long-time",
-          "title": "A Doc Pack is taking a long time"
-        },
-        {
-          "id": "comments-or-markups-are-not-visible",
-          "title": "Comments or markups are not visible"
-        },
-        {
-          "id": "jobs-and-ordering-look-wrong",
-          "title": "Jobs and ordering look wrong"
-        },
-        {
-          "id": "the-add-in-cannot-connect",
-          "title": "The add-in cannot connect"
-        },
-        {
-          "id": "the-browser-shows-an-authentication-or-csrf-error",
-          "title": "The browser shows an authentication or CSRF error"
-        },
-        {
-          "id": "what-to-collect-before-asking-for-help",
-          "title": "What to collect before asking for help"
-        }
-      ]
-    },
-    {
-      "id": "reference",
-      "title": "Reference",
-      "sections": [
-        {
-          "id": "web-ui-pages-routes",
-          "title": "Web UI pages (routes)"
-        },
-        {
-          "id": "api-endpoints",
-          "title": "API endpoints"
-        },
-        {
-          "id": "environment-variables",
-          "title": "Environment variables"
-        },
-        {
-          "id": "solidworks-add-in-options",
-          "title": "SolidWorks add-in options"
-        },
-        {
-          "id": "solidworks-add-in-tabs",
-          "title": "SolidWorks add-in tabs"
+          "id": "doc-rlsdemotesting",
+          "title": "RLS Demo Testing",
+          "sections": [
+            {
+              "id": "doc-rlsdemotesting--commands",
+              "title": "Commands"
+            },
+            {
+              "id": "doc-rlsdemotesting--curl-examples",
+              "title": "Curl Examples"
+            },
+            {
+              "id": "doc-rlsdemotesting--what-you-should-see",
+              "title": "What You Should See"
+            },
+            {
+              "id": "doc-rlsdemotesting--manual-checklist",
+              "title": "Manual Checklist"
+            }
+          ],
+          "source": "docs/RLS_DEMO_TESTING.md",
+          "source_url": "https://github.com/pzetairoi/TinyMRP-v2/blob/main/docs/RLS_DEMO_TESTING.md"
         }
       ]
     }
