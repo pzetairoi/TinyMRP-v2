@@ -223,7 +223,11 @@ def test_docpack_cannot_package_a_group_the_share_withholds(client, app, tmp_pat
     offered = options.get_json()["file_types"]
     assert "step" not in offered
     assert "dxf" not in offered
-    assert "png" in offered
+    # No "png" either: a pack selects by ext_group, which cannot separate a
+    # preview PNG from a drawing PNG, so a link that withholds drawings cannot
+    # package PNGs at all.
+    assert "png" not in offered
+    assert "ply" in offered
 
     named = public_client.post(
         f"{base}/docpacks/build",

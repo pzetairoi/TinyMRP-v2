@@ -378,9 +378,58 @@ manufacturer's own published document, so it is separate from your uploads.</li>
 ever contain file types the same link already grants, so a Preview link
 cannot package a STEP file by asking for a fabrication pack.</li>
 </ul>
-<p><strong>Include BOM children</strong> is separate from the level: it applies the same level
-to every descendant part and lets the recipient open their pages. Without it
-the link reaches exactly one part and one revision.</p>
+<p><strong>Include BOM children</strong> is a separate axis from the level. The level decides
+what each part shows; this decides how many parts the link reaches. With it on,
+the shared page carries a <strong>BOM</strong> table the recipient can expand and click
+through, and every descendant part shows at the same level as the root. With it
+off the link reaches exactly one part and one revision, and <strong>the BOM table is
+not shown at all</strong> — there is no BOM to show, so no empty heading appears.</p>
+<h3 id="what-the-recipient-actually-sees">What the recipient actually sees</h3>
+<p>The shared page only shows sections the link can fill:</p>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>Appears when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Preview image, 3D viewer</td>
+<td>always</td>
+</tr>
+<tr>
+<td><strong>Drawing</strong> tab</td>
+<td>Drawings granted, and a drawing exists</td>
+</tr>
+<tr>
+<td><strong>Datasheet</strong> tab</td>
+<td>Datasheets granted, and one is on file</td>
+</tr>
+<tr>
+<td><strong>Attributes</strong> tab</td>
+<td>Attributes granted</td>
+</tr>
+<tr>
+<td><strong>Files</strong> tab</td>
+<td>any download is granted — Drawings, Neutral CAD, Datasheets or All files</td>
+</tr>
+<tr>
+<td><strong>Doc Packs</strong> tab</td>
+<td>Doc Packs granted</td>
+</tr>
+<tr>
+<td><strong>BOM</strong> table</td>
+<td>Include BOM children ticked</td>
+</tr>
+</tbody>
+</table>
+<p>At the Preview level there is no <strong>Files</strong> tab: the link grants no downloads, so
+the tab would list only the image and the mesh the viewer is already showing.</p>
+<p>Doc Packs at the Preview level cannot contain PNGs. A pack picks files by type,
+and a preview image and a drawing export are the same type — so a link that may
+not show drawings cannot package images either. Grant <strong>Drawings</strong> if the
+recipient needs images in their pack.</p>
 <p>Review markups and internal comments are never exposed on a shared link,
 whatever the level. Links can be revoked at any time from the same tab, and the
 <strong>Grants</strong> column in the list shows what each existing link actually gives.</p>

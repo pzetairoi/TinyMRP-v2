@@ -246,9 +246,34 @@ a named level is fine; the link stores the switches, not the level name.
   ever contain file types the same link already grants, so a Preview link
   cannot package a STEP file by asking for a fabrication pack.
 
-**Include BOM children** is separate from the level: it applies the same level
-to every descendant part and lets the recipient open their pages. Without it
-the link reaches exactly one part and one revision.
+**Include BOM children** is a separate axis from the level. The level decides
+what each part shows; this decides how many parts the link reaches. With it on,
+the shared page carries a **BOM** table the recipient can expand and click
+through, and every descendant part shows at the same level as the root. With it
+off the link reaches exactly one part and one revision, and **the BOM table is
+not shown at all** — there is no BOM to show, so no empty heading appears.
+
+### What the recipient actually sees
+
+The shared page only shows sections the link can fill:
+
+| Section | Appears when |
+|---|---|
+| Preview image, 3D viewer | always |
+| **Drawing** tab | Drawings granted, and a drawing exists |
+| **Datasheet** tab | Datasheets granted, and one is on file |
+| **Attributes** tab | Attributes granted |
+| **Files** tab | any download is granted — Drawings, Neutral CAD, Datasheets or All files |
+| **Doc Packs** tab | Doc Packs granted |
+| **BOM** table | Include BOM children ticked |
+
+At the Preview level there is no **Files** tab: the link grants no downloads, so
+the tab would list only the image and the mesh the viewer is already showing.
+
+Doc Packs at the Preview level cannot contain PNGs. A pack picks files by type,
+and a preview image and a drawing export are the same type — so a link that may
+not show drawings cannot package images either. Grant **Drawings** if the
+recipient needs images in their pack.
 
 Review markups and internal comments are never exposed on a shared link,
 whatever the level. Links can be revoked at any time from the same tab, and the

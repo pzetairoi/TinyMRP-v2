@@ -670,6 +670,16 @@ export default function PartDetailPage() {
   const sharedAllowsChildren = !!publicShareInfo?.allow_children;
   const sharedAllowsDocpacks = !!publicShareInfo?.allow_docpacks;
   const sharedAllowsAttributes = !!publicShareInfo?.allow_attributes;
+  // The Files tab IS the download surface. At the Preview level a share grants
+  // no downloads, so the tab would list only the preview image and the mesh the
+  // 3D viewer already renders - a "Files" heading over what the page is
+  // showing anyway, which reads as a section that failed to load.
+  const sharedAllowsFileList =
+    !!publicShareInfo?.allow_drawings ||
+    !!publicShareInfo?.allow_neutral_cad ||
+    !!publicShareInfo?.allow_datasheets ||
+    !!publicShareInfo?.allow_all_files;
+  const showFilesTab = !isSharedView || sharedAllowsFileList;
   const sharedEnabledSummary = isSharedView
     ? [
         publicShareInfo?.allow_drawings ? "drawings" : "",
@@ -2146,7 +2156,12 @@ function isExternalDatasheetUrl(url: string): boolean {
       return legendKeys.has(String(k).toLowerCase())
     })
   }, [procMeta, legendKeys])
-  const hasBomContent = bomNodes.length > 0 || flatBomRows.length > 0 || flatBomLoading;
+  // A share without the child grant has no BOM to show: the server returns no
+  // nodes and no flat rows, and rendering the heading over that emptiness reads
+  // as a table that failed rather than as access this link was not given.
+  const showBom = !isSharedView || sharedAllowsChildren;
+  const hasBomContent =
+    showBom && (bomNodes.length > 0 || flatBomRows.length > 0 || flatBomLoading);
 
   // ---------- Render ----------
   const [tabIndex, setTabIndex] = useState(0)
@@ -2178,7 +2193,7 @@ function isExternalDatasheetUrl(url: string): boolean {
     Number(hasDatasheetPreview) +
     Number(!isSharedView || sharedAllowsAttributes) +
     Number(threeDOptions.length > 0) +
-    1 + // Files
+    Number(showFilesTab) +
     Number(!isSharedView || sharedAllowsDocpacks) +
     Number(!isSharedView && versions.length > 1) +
     Number(!isSharedView && jobsOrders.length > 0)
@@ -2960,7 +2975,7 @@ function isExternalDatasheetUrl(url: string): boolean {
               </TabPanel>
             )}
 
-            <TabPanel header={tabHeader("Files", "pi-paperclip")}>
+            {showFilesTab && <TabPanel header={tabHeader("Files", "pi-paperclip")}>
               <div className="d-flex flex-column gap-3">
                 {!canFilesRead && (
                   <div className="alert alert-secondary mb-0">
@@ -3068,7 +3083,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                   </>
                 )}
               </div>
-            </TabPanel>
+            </TabPanel>}
 
             {(!isSharedView || sharedAllowsDocpacks) && <TabPanel header={tabHeader("Doc Packs", "pi-folder")}>
               <NeedsData onNeeded={requestDocOpts} />

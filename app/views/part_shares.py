@@ -16,7 +16,11 @@ from app.models.part_share import PartShareLink
 from app.services.attrs import approval_field_values, harvest_part_attrs
 from app.services.audit import log_action
 from app.services.extra_files import extra_file_token_for, resolve_extra_file_token
-from app.services.field_config import get_field_config
+from app.services.field_config import (
+    context_field_ids,
+    get_field_config,
+    resolve_part_field_values,
+)
 from app.services.files_access import file_token_for, resolve_file_token
 from app.services.docpacks import DocPackOptions, build_docpack
 from app.services.export_security import (
@@ -48,7 +52,6 @@ from app.views.bom_tree import (
     _coverage_groups as _bom_coverage_groups,
     _is_hardware_node,
     _link_occurrence_qtys,
-    _node,
     _process_label,
 )
 from app.views.parts import (
@@ -179,6 +182,21 @@ def _share_managed_groups(share) -> frozenset[str]:
     """The ext_groups this share exposes, as proved by its resolved scope."""
 
     return _resolved_scope(share).managed_file_groups
+
+
+def _share_docpack_groups(share) -> frozenset[str]:
+    """The groups a doc pack from this share may contain.
+
+    The pack builder selects files by ext_group alone; it has no way to tell a
+    preview PNG from a drawing PNG, and both are ext_group "png". So a link
+    that may not show drawings may not package PNGs at all - otherwise the
+    build either smuggles the drawing out or, once the per-file check catches
+    it, fails the whole pack for a reason nobody could act on.
+    """
+    groups = _share_managed_groups(share)
+    if not _share_allows_drawings(share):
+        groups -= {"png"}
+    return groups
 
 
 def _share_or_abort(share_id: str, token: str):
@@ -341,10 +359,8 @@ def _rewrite_share_thumbs(share, raw_token: str, payload: dict) -> dict:
     return data
 
 
-def _public_bom_node(share, raw_token: str, node: dict) -> dict:
-    source = dict((node or {}).get("data") or {})
-    rewritten = _rewrite_share_thumbs(share, raw_token, source)
-    safe_keys = {
+_PUBLIC_BOM_NODE_KEYS = frozenset(
+    {
         "pn",
         "desc",
         "rev",
@@ -361,18 +377,89 @@ def _public_bom_node(share, raw_token: str, node: dict) -> dict:
         "level_qty",
         "total_qty",
     }
+)
+
+
+def _public_bom_node(
+    share,
+    raw_token: str,
+    pn: str,
+    rev: str,
+    config: dict,
+    *,
+    link=None,
+    leaf: bool | None = None,
+) -> dict:
+    """Build one public BOM row WITHOUT the authenticated field policy.
+
+    This used to wrap bom_tree._node(), which finishes by running the payload
+    through filter_response_fields() against current_user. A public share has
+    no user, so that returned {} and every row of the shared BOM tree rendered
+    blank - root included. The flat view escaped it only because it assembles
+    its own rows. What a share may show is decided here, by
+    _PUBLIC_BOM_NODE_KEYS, not by a signed-in user's field policy.
+    """
+    rev = normalize_share_revision(rev)
+    part = Part.objects(part_number__iexact=pn, revision__iexact=rev).first()
+    attrs = harvest_part_attrs(part) if part else {}
+    effective_rev = normalize_share_revision(
+        attrs.get("revision") or (part.revision if part else "") or rev
+    )
+    thumbs = _share_preview_urls_for(
+        share, raw_token, pn, effective_rev, is_dwg=False
+    )
+    values = resolve_part_field_values(
+        part,
+        context_field_ids("bom_tree", config),
+        attrs=attrs,
+        config=config,
+        extra={
+            "part_number": pn,
+            "revision": effective_rev,
+            "description": attrs.get("description", ""),
+            "process": _process_label(part, attrs),
+            "qty": getattr(link, "qty", None),
+            "uom": getattr(link, "uom", None),
+            "alt_group": getattr(link, "alt_group", "") or "",
+            "thumbnail": thumbs[0] if thumbs else "",
+        },
+        coverage=_bom_coverage_groups(pn, effective_rev),
+    )
+    source = {
+        "pn": pn,
+        "desc": attrs.get("description", ""),
+        "rev": effective_rev,
+        "qty": getattr(link, "qty", None),
+        "uom": getattr(link, "uom", None),
+        "alt_group": getattr(link, "alt_group", "") or "",
+        "process": _process_label(part, attrs),
+        "thumb_urls": thumbs,
+        "thumbnail": thumbs[0] if thumbs else "",
+        **{
+            key: value
+            for key, value in values.items()
+            if key in _PUBLIC_FIELD_IDS
+        },
+    }
+    safe_keys = set(_PUBLIC_BOM_NODE_KEYS) | (
+        _PUBLIC_FIELD_IDS if _share_allows_attributes(share) else frozenset()
+    )
     if _share_allows_attributes(share):
+        source.update(
+            {
+                key: attrs.get(key, "")
+                for key in ("category", "material", "finish", "mass", "status")
+            }
+        )
         safe_keys.update({"category", "material", "finish", "mass", "status"})
-    data = {key: value for key, value in rewritten.items() if key in safe_keys}
-    pn = str(data.get("pn") or data.get("part_number") or "").strip()
-    rev = normalize_share_revision(data.get("rev") or data.get("revision"))
+    data = {key: value for key, value in source.items() if key in safe_keys}
+    if leaf is None:
+        leaf = not _share_allows_children(share) or not _child_links(
+            pn, effective_rev
+        )
     return {
-        "key": f"{pn}::{rev}",
-        "leaf": (
-            True
-            if not _share_allows_children(share)
-            else bool((node or {}).get("leaf", True))
-        ),
+        "key": f"{pn}::{effective_rev}",
+        "leaf": bool(leaf),
         "data": data,
     }
 
@@ -466,7 +553,14 @@ def _part_detail_payload_for_share(share, raw_token: str, part: Part) -> dict:
     files = {"pdf": [], "dxf": [], "step": [], "edr": [], "3mf": [], "ply": [], "stl": [], "datasheet": []}
     for pf in (
         PartFile.objects(part_number__iexact=part.part_number, revision__iexact=norm_rev)
-        .only("ext_group", "rel_path", "path", "http_url", "id", "thumb_rel_path", "part_number", "revision")
+        .only(
+            *MANAGED_FILE_SCOPE_FIELDS,
+            "rel_path",
+            "path",
+            "http_url",
+            "id",
+            "thumb_rel_path",
+        )
         .order_by("ext_group", "rel_path")
     ):
         ext_group = str(getattr(pf, "ext_group", "") or "").strip().lower()
@@ -722,9 +816,7 @@ def public_share_files_overview(share_id: str, token: str):
             revision__iexact=current_rev,
         )
         .only(
-            "part_number",
-            "revision",
-            "ext_group",
+            *MANAGED_FILE_SCOPE_FIELDS,
             "ext",
             "rel_path",
             "path",
@@ -851,13 +943,19 @@ def public_share_bom_tree(share_id: str, token: str):
     parent_rev = normalize_share_revision(request.args.get("parent_rev"))
 
     if pn:
-        if not _share_allows_part_key(share, pn, rev):
+        # Without the child grant there is no BOM to show. Returning the root
+        # on its own gave the shared page a "BOM" heading over a single
+        # unexpandable row, which reads as a broken table rather than as a
+        # part of the system this link was not given.
+        if not _share_allows_children(share) or not _share_allows_part_key(
+            share,
+            pn,
+            rev,
+        ):
             resp = jsonify([])
             return public_response_headers(resp)
         root_part = _part_or_404(pn, rev)
-        root = _node(root_part.part_number, rev=rev, config=config)
-        root["children"] = []
-        root = _public_bom_node(share, token, root)
+        root = _public_bom_node(share, token, root_part.part_number, rev, config)
         root["children"] = []
         resp = jsonify([root])
         return public_response_headers(resp)
@@ -878,8 +976,16 @@ def public_share_bom_tree(share_id: str, token: str):
             child_rev = clean_rev(getattr(link, "child_rev", None)) if hasattr(link, "child_rev") else None
             if not _share_allows_part_key(share, child_pn, child_rev):
                 continue
-            node = _node(child_pn, link, rev=child_rev, config=config)
-            kids.append(_public_bom_node(share, token, node))
+            kids.append(
+                _public_bom_node(
+                    share,
+                    token,
+                    child_pn,
+                    child_rev or "",
+                    config,
+                    link=link,
+                )
+            )
         kids.sort(key=lambda item: 1 if _is_hardware_node(item) else 0)
         resp = jsonify(kids)
         return public_response_headers(resp)
@@ -914,8 +1020,6 @@ def public_share_bom_flat(share_id: str, token: str):
             proc_label = _process_label(part_doc, attrs)
             thumbs = _share_preview_urls_for(share, token, child_pn, effective_rev, is_dwg=False)
             coverage = _bom_coverage_groups(child_pn, effective_rev)
-            from app.services.field_config import context_field_ids, resolve_part_field_values
-
             values = resolve_part_field_values(
                 part_doc,
                 context_field_ids("bom_tree", config),
@@ -1063,10 +1167,10 @@ def _share_docpack_options_payload(
             part_number__iexact=pnr,
             revision__iexact=rev,
         )
-        for pf in q.only("part_number", "revision", "ext_group"):
+        for pf in q.only(*MANAGED_FILE_SCOPE_FIELDS):
             if (
                 pf.ext_group
-                and str(pf.ext_group).lower() in _share_managed_groups(share)
+                and str(pf.ext_group).lower() in _share_docpack_groups(share)
                 and _allowed_file_for_share(share, pf)
             ):
                 groups.add(str(pf.ext_group).lower())
@@ -1133,7 +1237,7 @@ def public_share_docpack_build(share_id: str, token: str):
         for group in (opts.file_types or [])
         if str(group or "").strip()
     }
-    allowed_groups = _share_managed_groups(share)
+    allowed_groups = _share_docpack_groups(share)
     if not requested_groups.issubset(allowed_groups):
         return _public_json({"error": "invalid_options"}, 400)
     # An empty file_types means "every group" to the pack builder, so a public
