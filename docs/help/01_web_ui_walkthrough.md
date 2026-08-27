@@ -202,16 +202,61 @@ layer and repeat your unsaved change instead of overwriting their work.
 - **Update files** rescans storage for this part and revision and relinks what
   it finds. Use it when files were added on disk outside an import. You can
   include child parts.
-- **Share** creates a link for someone without an account (below).
+- **Share** creates a link for someone without an account, at a chosen access
+  level (below).
 - **Delete part** removes this revision, optionally with children that are not
   used elsewhere.
 
 ### Sharing a part outside the system
 
-**Actions → Share** creates a link an outsider can open. You control whether
-**child parts**, **Doc Packs**, **attributes** and **unreleased revisions** are
-included, and set an **expiry date**. Links can be revoked at any time from the
-same tab.
+**Actions → Share** creates a link an outsider can open with no account. Pick
+an **expiry**, choose an **access level**, then create the link. The raw URL is
+shown once, at creation time.
+
+**Every share always shows the preview images and the 3D viewer.** That is the
+floor and it cannot be switched off — a link that shows nothing would not be
+worth sending. Note that rotating the model in the browser means the mesh file
+itself reaches the viewer; a mesh carries no dimensions or tolerances, unlike a
+STEP model.
+
+Each level adds to that floor:
+
+| Level | Adds |
+|---|---|
+| **Preview** | nothing — images and the 3D viewer only |
+| **Review** | drawings (drawing PNG and PDF), datasheets, part attributes |
+| **Supplier** | the above plus STEP/DXF/eDrawings, all associated files, and Doc Packs |
+
+**Customise what this level grants** opens the individual switches behind the
+levels, so you can build a combination no level covers — a datasheet with no
+drawing, or a drawing with no STEP model. Ticking a box that no longer matches
+a named level is fine; the link stores the switches, not the level name.
+
+- **Drawings** — the drawing PNG and the drawing PDF. A drawing carries
+  dimensions and tolerances, which the shaded preview does not.
+- **Neutral CAD** — STEP, DXF and eDrawings downloads. This is the geometry a
+  supplier can quote and cut from.
+- **Datasheets** — the component datasheet where one is on file. This is the
+  manufacturer's own published document, so it is separate from your uploads.
+- **All files** — associated uploads (dwg, xlsx, docx and the rest) in the
+  **Files** tab. Files whose source or label reads *internal*, *private*,
+  *review*, *markup* or *audit* are never shared, at any level.
+- **Attributes** — material, finish, mass and the **Attributes** tab.
+- **Doc Packs** — lets the recipient build a document pack. A pack can only
+  ever contain file types the same link already grants, so a Preview link
+  cannot package a STEP file by asking for a fabrication pack.
+
+**Include BOM children** is separate from the level: it applies the same level
+to every descendant part and lets the recipient open their pages. Without it
+the link reaches exactly one part and one revision.
+
+Review markups and internal comments are never exposed on a shared link,
+whatever the level. Links can be revoked at any time from the same tab, and the
+**Grants** column in the list shows what each existing link actually gives.
+
+> **Links created before access levels existed** keep granting what they
+> granted when they were sent — drawings, CAD and all files. Re-create the
+> link if you want it narrowed.
 
 > **Caution:** a share link is a URL containing a secret token. Anyone holding
 > it has the access you granted, so set an expiry and revoke links you no

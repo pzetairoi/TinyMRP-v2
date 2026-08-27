@@ -27,7 +27,8 @@ from app.services.export_security import (
 )
 from app.services.file_security import FileSecurityError
 from app.services.part_shares import (
-    PUBLIC_MANAGED_FILE_GROUPS,
+    ASSOCIATED_FILE_SCOPE_FIELDS,
+    MANAGED_FILE_SCOPE_FIELDS,
     create_part_share,
     normalize_share_revision,
     public_associated_file_path,
@@ -37,6 +38,7 @@ from app.services.part_shares import (
     record_part_share_access,
     resolve_public_part_share_scope,
     share_dict,
+    share_grants,
 )
 from app.services.timezone_utils import format_display_ts, local_input_value, utc_iso, utc_now
 from app.services.part_norm import clean_rev
@@ -157,6 +159,28 @@ def _share_allows_attributes(share) -> bool:
     return bool(getattr(share, "allow_attributes", False))
 
 
+def _share_allows_drawings(share) -> bool:
+    return share_grants(share, "allow_drawings")
+
+
+def _share_allows_neutral_cad(share) -> bool:
+    return share_grants(share, "allow_neutral_cad")
+
+
+def _share_allows_datasheets(share) -> bool:
+    return share_grants(share, "allow_datasheets")
+
+
+def _share_allows_all_files(share) -> bool:
+    return share_grants(share, "allow_all_files")
+
+
+def _share_managed_groups(share) -> frozenset[str]:
+    """The ext_groups this share exposes, as proved by its resolved scope."""
+
+    return _resolved_scope(share).managed_file_groups
+
+
 def _share_or_abort(share_id: str, token: str):
     scope, status = resolve_public_part_share_scope(share_id, token)
     if scope and status == "ok":
@@ -192,6 +216,53 @@ def _flag_enabled(value) -> bool:
     return value in (True, 1, "1", "true", "True", "on", "yes", "Yes")
 
 
+# Named starting points for the share form. A level only seeds the individual
+# grants; what gets stored is always the flags, never the level name, so a
+# customised link and a named-level link are the same kind of object.
+SHARE_ACCESS_TIERS: dict[str, dict[str, bool]] = {
+    "preview": {
+        "allow_drawings": False,
+        "allow_neutral_cad": False,
+        "allow_datasheets": False,
+        "allow_all_files": False,
+        "allow_attributes": False,
+        "allow_docpacks": False,
+    },
+    "review": {
+        "allow_drawings": True,
+        "allow_neutral_cad": False,
+        "allow_datasheets": True,
+        "allow_all_files": False,
+        "allow_attributes": True,
+        "allow_docpacks": False,
+    },
+    "supplier": {
+        "allow_drawings": True,
+        "allow_neutral_cad": True,
+        "allow_datasheets": True,
+        "allow_all_files": True,
+        "allow_attributes": True,
+        "allow_docpacks": True,
+    },
+}
+
+
+def _share_grants_from_payload(payload: dict) -> dict[str, bool]:
+    """Resolve the per-part grants from a level, per-flag overrides, or both.
+
+    A caller that names no level starts from Preview, so a client that predates
+    levels and posts only allow_docpacks/allow_attributes still gets exactly
+    what it asked for and nothing more.
+    """
+
+    tier = str(payload.get("tier") or "").strip().lower()
+    grants = dict(SHARE_ACCESS_TIERS.get(tier) or SHARE_ACCESS_TIERS["preview"])
+    for name in list(grants):
+        if name in payload:
+            grants[name] = _flag_enabled(payload.get(name))
+    return grants
+
+
 def _share_allows_part_key(share, pn: str, rev: str | None) -> bool:
     return _resolved_scope(share).allows_part(pn, rev)
 
@@ -214,7 +285,14 @@ def _share_preview_urls_for(share, raw_token: str, pn: str, rev: str, *, is_dwg:
             ext_group="png",
             is_dwg=is_dwg,
         )
-        .only("id", "part_number", "revision", "thumb_rel_path", "rel_path", "path", "mtime_iso")
+        .only(
+            *MANAGED_FILE_SCOPE_FIELDS,
+            "id",
+            "thumb_rel_path",
+            "rel_path",
+            "path",
+            "mtime_iso",
+        )
         .order_by("-mtime_iso", "rel_path")
     )
     if not rows:
@@ -478,6 +556,10 @@ def _part_detail_payload_for_share(share, raw_token: str, part: Part) -> dict:
             "allow_children": _share_allows_children(share),
             "allow_docpacks": _share_allows_docpacks(share),
             "allow_attributes": _share_allows_attributes(share),
+            "allow_drawings": _share_allows_drawings(share),
+            "allow_neutral_cad": _share_allows_neutral_cad(share),
+            "allow_datasheets": _share_allows_datasheets(share),
+            "allow_all_files": _share_allows_all_files(share),
         },
     }
 
@@ -674,16 +756,12 @@ def public_share_files_overview(share_id: str, token: str):
             revision__iexact=current_rev,
         )
         .only(
-            "part_number",
-            "revision",
-            "original_name",
+            *ASSOCIATED_FILE_SCOPE_FIELDS,
             "rel_path",
             "size",
             "mime",
-            "label",
             "uploaded_by",
             "uploaded_at",
-            "source",
         )
         .order_by("revision", "-uploaded_at", "original_name")
     ):
@@ -725,7 +803,14 @@ def public_share_part_images(share_id: str, token: str):
             ext_group="png",
             is_dwg=is_dwg,
         )
-        .only("id", "part_number", "revision", "thumb_rel_path", "rel_path", "path", "mtime_iso")
+        .only(
+            *MANAGED_FILE_SCOPE_FIELDS,
+            "id",
+            "thumb_rel_path",
+            "rel_path",
+            "path",
+            "mtime_iso",
+        )
         .order_by("-mtime_iso")
     )
 
@@ -981,7 +1066,7 @@ def _share_docpack_options_payload(
         for pf in q.only("part_number", "revision", "ext_group"):
             if (
                 pf.ext_group
-                and str(pf.ext_group).lower() in PUBLIC_MANAGED_FILE_GROUPS
+                and str(pf.ext_group).lower() in _share_managed_groups(share)
                 and _allowed_file_for_share(share, pf)
             ):
                 groups.add(str(pf.ext_group).lower())
@@ -1048,8 +1133,12 @@ def public_share_docpack_build(share_id: str, token: str):
         for group in (opts.file_types or [])
         if str(group or "").strip()
     }
-    if not requested_groups.issubset(PUBLIC_MANAGED_FILE_GROUPS):
+    allowed_groups = _share_managed_groups(share)
+    if not requested_groups.issubset(allowed_groups):
         return _public_json({"error": "invalid_options"}, 400)
+    # An empty file_types means "every group" to the pack builder, so a public
+    # build must name the groups rather than leave the choice open.
+    opts.file_types = sorted(requested_groups or allowed_groups)
     if (
         opts.depth not in {"top", "full"}
         or opts.classified_filter != "show"
@@ -1086,7 +1175,13 @@ def public_share_docpack_build(share_id: str, token: str):
         )
         groups_to_check = docpack_file_groups(opts)
         if groups_to_check is None:
-            groups_to_check = set(PUBLIC_MANAGED_FILE_GROUPS)
+            groups_to_check = set(allowed_groups)
+        # A fabrication pack forces dxf/step/pdf and a binder forces pdf, so an
+        # option that names no file type at all can still pull one in. Checking
+        # the IMPLIED groups is what stops a preview-only link from packaging a
+        # STEP model it may not show.
+        if not set(groups_to_check).issubset(allowed_groups):
+            return _public_json({"error": "invalid_options"}, 400)
         for planned_pn, planned_rev in planned_pairs:
             for pf in PartFile.objects(
                 part_number__iexact=planned_pn,
@@ -1204,8 +1299,13 @@ def create_part_share_api(pn: str):
     if expires_in_days < 1 or expires_in_days > 365:
         return jsonify({"ok": False, "error": "invalid_expiry"}), 400
     allow_children = _flag_enabled(payload.get("allow_children"))
-    allow_docpacks = _flag_enabled(payload.get("allow_docpacks"))
-    allow_attributes = _flag_enabled(payload.get("allow_attributes"))
+    grants = _share_grants_from_payload(payload)
+    allow_docpacks = grants["allow_docpacks"]
+    allow_attributes = grants["allow_attributes"]
+    allow_drawings = grants["allow_drawings"]
+    allow_neutral_cad = grants["allow_neutral_cad"]
+    allow_datasheets = grants["allow_datasheets"]
+    allow_all_files = grants["allow_all_files"]
     try:
         shared_pairs = (
             exact_bom_pairs(
@@ -1247,6 +1347,10 @@ def create_part_share_api(pn: str):
             current_user,
             "parts.read_unreleased",
         ),
+        allow_drawings=allow_drawings,
+        allow_neutral_cad=allow_neutral_cad,
+        allow_datasheets=allow_datasheets,
+        allow_all_files=allow_all_files,
     )
     try:
         log_action(
@@ -1259,6 +1363,10 @@ def create_part_share_api(pn: str):
                 "allow_children": allow_children,
                 "allow_docpacks": allow_docpacks,
                 "allow_attributes": allow_attributes,
+                "allow_drawings": allow_drawings,
+                "allow_neutral_cad": allow_neutral_cad,
+                "allow_datasheets": allow_datasheets,
+                "allow_all_files": allow_all_files,
                 "allow_unreleased": has_permission(
                     current_user,
                     "parts.read_unreleased",

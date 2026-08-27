@@ -226,6 +226,82 @@ type FileOverviewSection = {
   files?: FileOverviewRow[];
 };
 
+// Mirrors SHARE_ACCESS_TIERS in app/views/part_shares.py. The tier is only a
+// starting point for the checkboxes below it; what gets sent, and what the
+// server stores, is always the individual grants.
+type ShareGrants = {
+  allow_drawings: boolean;
+  allow_neutral_cad: boolean;
+  allow_datasheets: boolean;
+  allow_all_files: boolean;
+  allow_attributes: boolean;
+  allow_docpacks: boolean;
+};
+
+type ShareTier = "preview" | "review" | "supplier";
+
+const SHARE_TIERS: Record<ShareTier, { label: string; hint: string; grants: ShareGrants }> = {
+  preview: {
+    label: "Preview",
+    hint: "Images and the 3D viewer only.",
+    grants: {
+      allow_drawings: false,
+      allow_neutral_cad: false,
+      allow_datasheets: false,
+      allow_all_files: false,
+      allow_attributes: false,
+      allow_docpacks: false,
+    },
+  },
+  review: {
+    label: "Review",
+    hint: "Adds drawings, datasheets and part attributes.",
+    grants: {
+      allow_drawings: true,
+      allow_neutral_cad: false,
+      allow_datasheets: true,
+      allow_all_files: false,
+      allow_attributes: true,
+      allow_docpacks: false,
+    },
+  },
+  supplier: {
+    label: "Supplier",
+    hint: "Adds STEP/DXF, every file, and Doc Packs.",
+    grants: {
+      allow_drawings: true,
+      allow_neutral_cad: true,
+      allow_datasheets: true,
+      allow_all_files: true,
+      allow_attributes: true,
+      allow_docpacks: true,
+    },
+  },
+};
+
+const SHARE_GRANT_LABELS: { key: keyof ShareGrants; label: string; hint: string }[] = [
+  { key: "allow_drawings", label: "Drawings", hint: "Drawing PNG and drawing PDF." },
+  { key: "allow_neutral_cad", label: "Neutral CAD", hint: "STEP, DXF and eDrawings downloads." },
+  { key: "allow_datasheets", label: "Datasheets", hint: "The component datasheet, where one is on file." },
+  { key: "allow_all_files", label: "All files", hint: "Associated uploads (dwg, xlsx, docx) in the Files tab." },
+  { key: "allow_attributes", label: "Attributes", hint: "Material, finish, mass and the attributes tab." },
+  { key: "allow_docpacks", label: "Doc Packs", hint: "Lets the recipient build a document pack." },
+];
+
+function shareRowGrants(row: PartShareRow): string {
+  const granted = SHARE_GRANT_LABELS.filter((entry) => row[entry.key]).map((entry) => entry.label);
+  // Images and the 3D viewer are the floor for every link, so a row with no
+  // extra grant is not "nothing" - say what it does give.
+  return granted.length ? granted.join(", ") : "Images + 3D";
+}
+
+function tierForGrants(grants: ShareGrants): ShareTier | null {
+  const match = (Object.keys(SHARE_TIERS) as ShareTier[]).find((tier) =>
+    SHARE_GRANT_LABELS.every((row) => SHARE_TIERS[tier].grants[row.key] === grants[row.key]),
+  );
+  return match || null;
+}
+
 type PublicShareInfo = {
   share_id?: string;
   created_at?: string;
@@ -238,6 +314,10 @@ type PublicShareInfo = {
   allow_children?: boolean;
   allow_docpacks?: boolean;
   allow_attributes?: boolean;
+  allow_drawings?: boolean;
+  allow_neutral_cad?: boolean;
+  allow_datasheets?: boolean;
+  allow_all_files?: boolean;
 };
 
 type PartShareRow = {
@@ -248,6 +328,10 @@ type PartShareRow = {
   allow_children?: boolean;
   allow_docpacks?: boolean;
   allow_attributes?: boolean;
+  allow_drawings?: boolean;
+  allow_neutral_cad?: boolean;
+  allow_datasheets?: boolean;
+  allow_all_files?: boolean;
   status?: string;
   created_at?: string | null;
   created_at_display?: string | null;
@@ -482,7 +566,9 @@ export default function PartDetailPage() {
   const [shareCopied, setShareCopied] = useState(false);
   const [shareExpiresDays, setShareExpiresDays] = useState("30");
   const [shareAllowChildren, setShareAllowChildren] = useState(false);
-  const [shareAllowExtended, setShareAllowExtended] = useState(false);
+  const [shareTier, setShareTier] = useState<ShareTier>("preview");
+  const [shareGrants, setShareGrants] = useState<ShareGrants>(SHARE_TIERS.preview.grants);
+  const [shareCustomiseOpen, setShareCustomiseOpen] = useState(false);
   const [shareRevokingId, setShareRevokingId] = useState<string | null>(null);
   const [arenaBaseUrl, setArenaBaseUrl] = useState("");
   const [arenaBusy, setArenaBusy] = useState<null | "bom" | "links">(null);
@@ -584,6 +670,17 @@ export default function PartDetailPage() {
   const sharedAllowsChildren = !!publicShareInfo?.allow_children;
   const sharedAllowsDocpacks = !!publicShareInfo?.allow_docpacks;
   const sharedAllowsAttributes = !!publicShareInfo?.allow_attributes;
+  const sharedEnabledSummary = isSharedView
+    ? [
+        publicShareInfo?.allow_drawings ? "drawings" : "",
+        publicShareInfo?.allow_neutral_cad ? "CAD downloads" : "",
+        publicShareInfo?.allow_datasheets ? "datasheets" : "",
+        publicShareInfo?.allow_all_files ? "all files" : "",
+        sharedAllowsAttributes ? "attributes" : "",
+        sharedAllowsDocpacks ? "doc packs" : "",
+        sharedAllowsChildren ? "child parts" : "",
+      ].filter(Boolean)
+    : [];
 
   // --- TreeTable filters (controlled) ---
   // PrimeReact's own type. matchMode is a closed union there, so the loose
@@ -1899,8 +1996,7 @@ function isExternalDatasheetUrl(url: string): boolean {
           rev: effectiveRev || "",
           expires_in_days: Number(shareExpiresDays || 30),
           allow_children: shareAllowChildren,
-          allow_docpacks: shareAllowExtended,
-          allow_attributes: shareAllowExtended,
+          ...shareGrants,
         }),
       })
       setShareCreateUrl(String(data?.url || ""))
@@ -2474,15 +2570,11 @@ function isExternalDatasheetUrl(url: string): boolean {
               <div className="alert alert-info py-2 px-3 mt-2 mb-0 small">
                 Read-only shared view.
                 {publicShareInfo?.expires_at ? ` Expires ${publicShareInfo.expires_at_display || publicShareInfo.expires_at}.` : ""}
-                {(sharedAllowsChildren || sharedAllowsDocpacks || sharedAllowsAttributes) ? (
-                  <div className="mt-1">
-                    Enabled:
-                    {sharedAllowsChildren ? " child parts" : ""}
-                    {sharedAllowsChildren && (sharedAllowsDocpacks || sharedAllowsAttributes) ? "," : ""}
-                    {sharedAllowsDocpacks || sharedAllowsAttributes ? " doc packs and attributes" : ""}
-                    .
-                  </div>
-                ) : null}
+                <div className="mt-1">
+                  {sharedEnabledSummary.length
+                    ? `Includes images, the 3D viewer, and ${sharedEnabledSummary.join(", ")}.`
+                    : "Includes images and the 3D viewer."}
+                </div>
               </div>
             ) : null}
           </div>
@@ -3598,43 +3690,92 @@ function isExternalDatasheetUrl(url: string): boolean {
                           </button>
                         </div>
                       </div>
-                      <div className="row g-3 mt-1">
-                        <div className="col-md-6">
-                          <div className="form-check">
-                            <input
-                              className="form-check-input"
-                              type="checkbox"
-                              id="shareAllowChildren"
-                              checked={shareAllowChildren}
-                              disabled={shareCreateBusy}
-                              onChange={(e) => setShareAllowChildren(e.target.checked)}
-                            />
-                            <label className="form-check-label" htmlFor="shareAllowChildren">
-                              Allow access to BOM children
-                            </label>
-                          </div>
-                          <div className="text-muted small mt-1">
-                            Lets external users open descendant part pages inside the same shared link.
-                          </div>
+                      <div className="mt-3">
+                        <div className="fw-semibold small mb-1">Access level</div>
+                        <div className="text-muted small mb-2">
+                          Every share always includes the preview images and the 3D viewer. Each level adds to that.
                         </div>
-                        <div className="col-md-6">
-                          <div className="form-check">
-                            <input
-                              className="form-check-input"
-                              type="checkbox"
-                              id="shareAllowExtended"
-                              checked={shareAllowExtended}
-                              disabled={shareCreateBusy}
-                              onChange={(e) => setShareAllowExtended(e.target.checked)}
-                            />
-                            <label className="form-check-label" htmlFor="shareAllowExtended">
-                              Allow doc packs and attributes
-                            </label>
-                          </div>
-                          <div className="text-muted small mt-1">
-                            Exposes the All attributes and Doc Packs tabs for this shared link.
-                          </div>
+                        <div className="d-flex flex-column flex-md-row gap-3">
+                          {(Object.keys(SHARE_TIERS) as ShareTier[]).map((tier) => (
+                            <div className="form-check" key={tier}>
+                              <input
+                                className="form-check-input"
+                                type="radio"
+                                name="shareTier"
+                                id={`shareTier-${tier}`}
+                                checked={shareTier === tier}
+                                disabled={shareCreateBusy}
+                                onChange={() => {
+                                  setShareTier(tier);
+                                  setShareGrants(SHARE_TIERS[tier].grants);
+                                }}
+                              />
+                              <label className="form-check-label" htmlFor={`shareTier-${tier}`}>
+                                {SHARE_TIERS[tier].label}
+                                <span className="d-block text-muted small">{SHARE_TIERS[tier].hint}</span>
+                              </label>
+                            </div>
+                          ))}
                         </div>
+                      </div>
+                      <div className="mt-3">
+                        <div className="form-check">
+                          <input
+                            className="form-check-input"
+                            type="checkbox"
+                            id="shareAllowChildren"
+                            checked={shareAllowChildren}
+                            disabled={shareCreateBusy}
+                            onChange={(e) => setShareAllowChildren(e.target.checked)}
+                          />
+                          <label className="form-check-label" htmlFor="shareAllowChildren">
+                            Include BOM children
+                          </label>
+                        </div>
+                        <div className="text-muted small mt-1">
+                          Applies the level above to every descendant part, and lets the recipient open their pages.
+                        </div>
+                      </div>
+                      <div className="mt-3">
+                        <button
+                          type="button"
+                          className="btn btn-link btn-sm p-0"
+                          aria-expanded={shareCustomiseOpen}
+                          onClick={() => setShareCustomiseOpen((open) => !open)}
+                        >
+                          {shareCustomiseOpen ? "Hide" : "Customise"} what this level grants
+                        </button>
+                        {shareCustomiseOpen ? (
+                          <div className="row g-2 mt-1">
+                            {SHARE_GRANT_LABELS.map((row) => (
+                              <div className="col-md-6" key={row.key}>
+                                <div className="form-check">
+                                  <input
+                                    className="form-check-input"
+                                    type="checkbox"
+                                    id={`shareGrant-${row.key}`}
+                                    checked={shareGrants[row.key]}
+                                    disabled={shareCreateBusy}
+                                    onChange={(e) => {
+                                      const next = { ...shareGrants, [row.key]: e.target.checked };
+                                      setShareGrants(next);
+                                      setShareTier((current) => tierForGrants(next) || current);
+                                    }}
+                                  />
+                                  <label className="form-check-label" htmlFor={`shareGrant-${row.key}`}>
+                                    {row.label}
+                                  </label>
+                                </div>
+                                <div className="text-muted small">{row.hint}</div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                        {shareCustomiseOpen && !tierForGrants(shareGrants) ? (
+                          <div className="text-muted small mt-2">
+                            Custom combination — it no longer matches a named level.
+                          </div>
+                        ) : null}
                       </div>
                       {shareCreateError ? <div className="text-danger small mt-2">{shareCreateError}</div> : null}
                       {shareCreateUrl ? (
@@ -3663,7 +3804,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                                   <th>Prefix</th>
                                   <th>Status</th>
                                   <th>Children</th>
-                                  <th>Doc packs / attrs</th>
+                                  <th>Grants</th>
                                   <th>Created</th>
                                   <th>Expires</th>
                                   <th>Last access</th>
@@ -3677,7 +3818,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                                     <td><code>{item.token_prefix || "-"}</code></td>
                                     <td>{item.status || "-"}</td>
                                     <td>{item.allow_children ? "Yes" : "-"}</td>
-                                    <td>{item.allow_docpacks || item.allow_attributes ? "Yes" : "-"}</td>
+                                    <td className="small">{shareRowGrants(item)}</td>
                                     <td>{item.created_at_display || item.created_at || "-"}</td>
                                     <td>{item.expires_at_display || item.expires_at || "-"}</td>
                                     <td>{item.last_accessed_at_display || item.last_accessed_at || "-"}</td>

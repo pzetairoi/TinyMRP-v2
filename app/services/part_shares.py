@@ -26,8 +26,37 @@ from app.services.part_norm import clean_rev
 from app.services.timezone_utils import format_display_ts, local_input_value, utc_iso, utc_now
 
 
+# What a share exposes, by access level. The baseline is what every share
+# grants and cannot withhold: the preview images, and the meshes the in-browser
+# 3D viewer needs to render anything at all. Each level above it is a grant.
+BASELINE_MANAGED_FILE_GROUPS = frozenset({"png", "3mf", "ply", "stl"})
+# Drawing PNGs are ext_group "png" too; is_dwg separates them, not the group,
+# so allows_managed_file() checks that flag rather than this set.
+DRAWING_MANAGED_FILE_GROUPS = frozenset({"pdf"})
+NEUTRAL_CAD_MANAGED_FILE_GROUPS = frozenset({"step", "dxf", "edr"})
+# A datasheet is the component manufacturer's own published document, not our
+# design data, so it gets its own grant rather than riding along with the
+# associated uploads - you can hand someone a datasheet without also handing
+# them the internal spreadsheets that happen to sit beside it.
+DATASHEET_MANAGED_FILE_GROUPS = frozenset({"datasheet"})
+# allow_all_files adds no managed group of its own: it is the grant that opens
+# the ASSOCIATED uploads (dwg, xlsx, docx and the rest) to the Files tab.
 PUBLIC_MANAGED_FILE_GROUPS = frozenset(
-    {"png", "pdf", "dxf", "step", "edr", "3mf", "ply", "stl", "datasheet"}
+    BASELINE_MANAGED_FILE_GROUPS
+    | DRAWING_MANAGED_FILE_GROUPS
+    | NEUTRAL_CAD_MANAGED_FILE_GROUPS
+    | DATASHEET_MANAGED_FILE_GROUPS
+)
+# Grants added after the first shares were issued. A missing field means the
+# link predates them, and a link already in circulation must not start showing
+# less than it did when it was sent, so None grandfathers to the old behaviour.
+_GRANDFATHERED_GRANTS = frozenset(
+    {
+        "allow_drawings",
+        "allow_neutral_cad",
+        "allow_datasheets",
+        "allow_all_files",
+    }
 )
 PUBLIC_ASSOCIATED_EXTENSIONS = frozenset(
     {
@@ -51,8 +80,43 @@ PUBLIC_ASSOCIATED_EXTENSIONS = frozenset(
         "docx",
     }
 )
+# Every field PublicPartShareScope.allows_managed_file() reads. A .only()
+# projection that omits one leaves the attribute None, so the guard denies a
+# file that IS in scope - which is exactly how shared previews went blank while
+# the file listings, projected differently, carried on working.
+MANAGED_FILE_SCOPE_FIELDS = ("part_number", "revision", "ext_group", "is_dwg")
+# Same contract for allows_associated_file().
+ASSOCIATED_FILE_SCOPE_FIELDS = (
+    "part_number",
+    "revision",
+    "original_name",
+    "source",
+    "label",
+)
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 _INTERNAL_FILE_TERMS = ("internal", "private", "review", "markup", "audit")
+
+
+def share_grants(share: PartShareLink, name: str) -> bool:
+    """Read one share grant, grandfathering the tiers onto older links."""
+
+    value = getattr(share, name, None)
+    if value is None and name in _GRANDFATHERED_GRANTS:
+        return True
+    return bool(value)
+
+
+def share_managed_file_groups(share: PartShareLink) -> frozenset[str]:
+    """The managed ext_groups this share exposes, baseline plus its grants."""
+
+    groups = set(BASELINE_MANAGED_FILE_GROUPS)
+    if share_grants(share, "allow_drawings"):
+        groups |= DRAWING_MANAGED_FILE_GROUPS
+    if share_grants(share, "allow_neutral_cad"):
+        groups |= NEUTRAL_CAD_MANAGED_FILE_GROUPS
+    if share_grants(share, "allow_datasheets"):
+        groups |= DATASHEET_MANAGED_FILE_GROUPS
+    return frozenset(groups)
 
 
 @dataclass(frozen=True)
@@ -61,6 +125,8 @@ class PublicPartShareScope:
     root: tuple[str, str]
     allowed_parts: frozenset[tuple[str, str]]
     managed_file_groups: frozenset[str]
+    allow_drawings: bool = True
+    allow_associated_files: bool = True
 
     def allows_part(self, part_number: Any, revision: Any) -> bool:
         key = (
@@ -71,15 +137,25 @@ class PublicPartShareScope:
 
     def allows_managed_file(self, file_record: PartFile) -> bool:
         group = str(getattr(file_record, "ext_group", "") or "").strip().lower()
-        return bool(
-            group in self.managed_file_groups
-            and self.allows_part(
-                getattr(file_record, "part_number", ""),
-                getattr(file_record, "revision", ""),
-            )
+        if group not in self.managed_file_groups:
+            return False
+        # A drawing export is a PNG like any other preview, so the group alone
+        # cannot separate "here is what the part looks like" from "here are its
+        # dimensions". is_dwg is what distinguishes them.
+        if (
+            group == "png"
+            and bool(getattr(file_record, "is_dwg", False))
+            and not self.allow_drawings
+        ):
+            return False
+        return self.allows_part(
+            getattr(file_record, "part_number", ""),
+            getattr(file_record, "revision", ""),
         )
 
     def allows_associated_file(self, file_record: PartExtraFile) -> bool:
+        if not self.allow_associated_files:
+            return False
         name = str(getattr(file_record, "original_name", "") or "").strip()
         extension = name.rsplit(".", 1)[-1].lower() if "." in name else ""
         source = str(getattr(file_record, "source", "") or "").strip().lower()
@@ -122,6 +198,10 @@ def create_part_share(
     allow_docpacks: bool = False,
     allow_attributes: bool = False,
     allow_unreleased: bool = False,
+    allow_drawings: bool = False,
+    allow_neutral_cad: bool = False,
+    allow_datasheets: bool = False,
+    allow_all_files: bool = False,
 ) -> tuple[PartShareLink, str]:
     raw_token = secrets.token_urlsafe(32)
     share = PartShareLink(
@@ -133,6 +213,10 @@ def create_part_share(
         allow_docpacks=bool(allow_docpacks),
         allow_attributes=bool(allow_attributes),
         allow_unreleased=bool(allow_unreleased),
+        allow_drawings=bool(allow_drawings),
+        allow_neutral_cad=bool(allow_neutral_cad),
+        allow_datasheets=bool(allow_datasheets),
+        allow_all_files=bool(allow_all_files),
         enabled=True,
         created_by_user_id=str(getattr(created_by, "id", "") or ""),
         created_by_email=str(getattr(created_by, "email", "") or ""),
@@ -242,7 +326,9 @@ def _build_public_scope(share: PartShareLink) -> PublicPartShareScope:
         share=share,
         root=root,
         allowed_parts=frozenset(allowed),
-        managed_file_groups=PUBLIC_MANAGED_FILE_GROUPS,
+        managed_file_groups=share_managed_file_groups(share),
+        allow_drawings=share_grants(share, "allow_drawings"),
+        allow_associated_files=share_grants(share, "allow_all_files"),
     )
 
 
@@ -331,6 +417,10 @@ def share_dict(share: PartShareLink) -> dict[str, Any]:
         "allow_children": bool(getattr(share, "allow_children", False)),
         "allow_docpacks": bool(getattr(share, "allow_docpacks", False)),
         "allow_attributes": bool(getattr(share, "allow_attributes", False)),
+        "allow_drawings": share_grants(share, "allow_drawings"),
+        "allow_neutral_cad": share_grants(share, "allow_neutral_cad"),
+        "allow_datasheets": share_grants(share, "allow_datasheets"),
+        "allow_all_files": share_grants(share, "allow_all_files"),
         "enabled": bool(getattr(share, "enabled", True)),
         "status": share_status(share),
         "created_at": utc_iso(share.created_at),

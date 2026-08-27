@@ -47,6 +47,19 @@ def test_admin_can_create_public_share_and_revoke_it(client, app, tmp_path):
         path=str(abs_path),
         content_type="application/pdf",
     ).save()
+    png_rel_path = "shared/PN-SHARE/A/preview.png"
+    png_abs_path = tmp_path / "shared" / "PN-SHARE" / "A" / "preview.png"
+    png_abs_path.write_bytes(b"png-bytes")
+    PartFile(
+        part_number=part.part_number,
+        revision=part.revision,
+        ext_group="png",
+        ext="png",
+        is_dwg=False,
+        rel_path=png_rel_path,
+        path=str(png_abs_path),
+        content_type="image/png",
+    ).save()
 
     _login(client, admin)
 
@@ -97,12 +110,27 @@ def test_admin_can_create_public_share_and_revoke_it(client, app, tmp_path):
     )
     assert docpack_forbidden.status_code == 403
 
-    pdf_url = detail_payload["files"]["pdf"][0]["url"]
-    pdf_path = urlsplit(pdf_url).path
-    file_resp = public_client.get(pdf_path)
+    # The default share is the Preview level: images and the 3D viewer only, so
+    # the drawing PDF stays behind its grant.
+    assert detail_payload["files"]["pdf"] == []
+    assert detail_payload["public_share"]["allow_drawings"] is False
+
+    # ...but the preview image is the FLOOR of every share. It went blank in
+    # production because the query behind it projected away ext_group, which
+    # made the scope guard deny a file that was in fact shareable.
+    assert detail_payload["images"], "a share must always expose its preview image"
+    image_path = urlsplit(detail_payload["images"][-1]).path
+    file_resp = public_client.get(image_path)
     assert file_resp.status_code == 200
-    assert file_resp.data == b"pdf-bytes"
+    assert file_resp.data == b"png-bytes"
     assert "no-store" in file_resp.headers.get("Cache-Control", "")
+
+    images_resp = public_client.get(
+        f"/api/share/part/{share_id}/{share_token}/part_images"
+        f"?pn={part.part_number}&rev={part.revision}&mode=preview"
+    )
+    assert images_resp.status_code == 200
+    assert images_resp.get_json(), "part_images must not come back empty for a shared preview"
 
     list_after_access = client.get(f"/api/parts/{part.part_number}/shares?rev={part.revision}")
     assert list_after_access.status_code == 200
@@ -150,9 +178,8 @@ def test_public_share_can_include_children_and_docpacks(client, app, tmp_path):
         json={
             "rev": root.revision,
             "expires_in_days": 30,
+            "tier": "supplier",
             "allow_children": True,
-            "allow_docpacks": True,
-            "allow_attributes": True,
         },
     )
     assert create_resp.status_code == 200

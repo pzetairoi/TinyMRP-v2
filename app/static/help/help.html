@@ -322,15 +322,73 @@ layer and repeat your unsaved change instead of overwriting their work.</p>
 <li><strong>Update files</strong> rescans storage for this part and revision and relinks what
 it finds. Use it when files were added on disk outside an import. You can
 include child parts.</li>
-<li><strong>Share</strong> creates a link for someone without an account (below).</li>
+<li><strong>Share</strong> creates a link for someone without an account, at a chosen access
+level (below).</li>
 <li><strong>Delete part</strong> removes this revision, optionally with children that are not
 used elsewhere.</li>
 </ul>
 <h3 id="sharing-a-part-outside-the-system">Sharing a part outside the system</h3>
-<p><strong>Actions → Share</strong> creates a link an outsider can open. You control whether
-<strong>child parts</strong>, <strong>Doc Packs</strong>, <strong>attributes</strong> and <strong>unreleased revisions</strong> are
-included, and set an <strong>expiry date</strong>. Links can be revoked at any time from the
-same tab.</p>
+<p><strong>Actions → Share</strong> creates a link an outsider can open with no account. Pick
+an <strong>expiry</strong>, choose an <strong>access level</strong>, then create the link. The raw URL is
+shown once, at creation time.</p>
+<p><strong>Every share always shows the preview images and the 3D viewer.</strong> That is the
+floor and it cannot be switched off — a link that shows nothing would not be
+worth sending. Note that rotating the model in the browser means the mesh file
+itself reaches the viewer; a mesh carries no dimensions or tolerances, unlike a
+STEP model.</p>
+<p>Each level adds to that floor:</p>
+<table>
+<thead>
+<tr>
+<th>Level</th>
+<th>Adds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Preview</strong></td>
+<td>nothing — images and the 3D viewer only</td>
+</tr>
+<tr>
+<td><strong>Review</strong></td>
+<td>drawings (drawing PNG and PDF), datasheets, part attributes</td>
+</tr>
+<tr>
+<td><strong>Supplier</strong></td>
+<td>the above plus STEP/DXF/eDrawings, all associated files, and Doc Packs</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Customise what this level grants</strong> opens the individual switches behind the
+levels, so you can build a combination no level covers — a datasheet with no
+drawing, or a drawing with no STEP model. Ticking a box that no longer matches
+a named level is fine; the link stores the switches, not the level name.</p>
+<ul>
+<li><strong>Drawings</strong> — the drawing PNG and the drawing PDF. A drawing carries
+dimensions and tolerances, which the shaded preview does not.</li>
+<li><strong>Neutral CAD</strong> — STEP, DXF and eDrawings downloads. This is the geometry a
+supplier can quote and cut from.</li>
+<li><strong>Datasheets</strong> — the component datasheet where one is on file. This is the
+manufacturer's own published document, so it is separate from your uploads.</li>
+<li><strong>All files</strong> — associated uploads (dwg, xlsx, docx and the rest) in the
+<strong>Files</strong> tab. Files whose source or label reads <em>internal</em>, <em>private</em>,
+<em>review</em>, <em>markup</em> or <em>audit</em> are never shared, at any level.</li>
+<li><strong>Attributes</strong> — material, finish, mass and the <strong>Attributes</strong> tab.</li>
+<li><strong>Doc Packs</strong> — lets the recipient build a document pack. A pack can only
+ever contain file types the same link already grants, so a Preview link
+cannot package a STEP file by asking for a fabrication pack.</li>
+</ul>
+<p><strong>Include BOM children</strong> is separate from the level: it applies the same level
+to every descendant part and lets the recipient open their pages. Without it
+the link reaches exactly one part and one revision.</p>
+<p>Review markups and internal comments are never exposed on a shared link,
+whatever the level. Links can be revoked at any time from the same tab, and the
+<strong>Grants</strong> column in the list shows what each existing link actually gives.</p>
+<blockquote>
+<p><strong>Links created before access levels existed</strong> keep granting what they
+granted when they were sent — drawings, CAD and all files. Re-create the
+link if you want it narrowed.</p>
+</blockquote>
 <blockquote>
 <p><strong>Caution:</strong> a share link is a URL containing a secret token. Anyone holding
 it has the access you granted, so set an expiry and revoke links you no

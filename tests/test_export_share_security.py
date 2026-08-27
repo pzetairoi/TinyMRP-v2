@@ -87,7 +87,15 @@ def _managed_file(root, part, group="pdf", content=b"file"):
 
 
 def _create_share(client, part, **options):
-    payload = {"rev": part.revision, "expires_in_days": 30, **options}
+    # These are scope tests: they ask which PARTS and which FILES a token
+    # reaches, not which file types a level grants. Default to the widest
+    # level so a denial here still means the scope check denied it.
+    payload = {
+        "rev": part.revision,
+        "expires_in_days": 30,
+        "tier": "supplier",
+        **options,
+    }
     response = client.post(
         f"/api/parts/{part.part_number}/shares",
         json=payload,
