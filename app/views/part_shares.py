@@ -254,7 +254,7 @@ SHARE_ACCESS_TIERS: dict[str, dict[str, bool]] = {
         "allow_attributes": True,
         "allow_docpacks": False,
     },
-    "supplier": {
+    "full": {
         "allow_drawings": True,
         "allow_neutral_cad": True,
         "allow_datasheets": True,
@@ -263,6 +263,11 @@ SHARE_ACCESS_TIERS: dict[str, dict[str, bool]] = {
         "allow_docpacks": True,
     },
 }
+
+
+# "supplier" was the first name for the widest level and shipped as a wire
+# value, so it keeps resolving even though the UI now calls it Full access.
+_SHARE_TIER_ALIASES = {"supplier": "full"}
 
 
 def _share_grants_from_payload(payload: dict) -> dict[str, bool]:
@@ -274,6 +279,7 @@ def _share_grants_from_payload(payload: dict) -> dict[str, bool]:
     """
 
     tier = str(payload.get("tier") or "").strip().lower()
+    tier = _SHARE_TIER_ALIASES.get(tier, tier)
     grants = dict(SHARE_ACCESS_TIERS.get(tier) or SHARE_ACCESS_TIERS["preview"])
     for name in list(grants):
         if name in payload:
@@ -638,6 +644,14 @@ def _part_detail_payload_for_share(share, raw_token: str, part: Part) -> dict:
         "can_parts_delete": False,
         "can_parts_edit": False,
         "can_parts_note": False,
+        # The page gates whole sections on these. They describe what THIS
+        # VIEWER may do, and on a public link the grants are the only answer
+        # there is - a share has no signed-in user, so leaving them out meant
+        # the Files tab claimed the viewer lacked files.read and the Doc Packs
+        # tab offered a permissions notice where its form should have been.
+        "can_files_read": True,
+        "can_bom_read": _share_allows_children(share),
+        "can_export": _share_allows_docpacks(share),
         "public_share": {
             "share_id": str(share.id),
             "created_at": utc_iso(share.created_at),

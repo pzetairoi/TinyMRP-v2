@@ -178,7 +178,7 @@ def test_public_share_can_include_children_and_docpacks(client, app, tmp_path):
         json={
             "rev": root.revision,
             "expires_in_days": 30,
-            "tier": "supplier",
+            "tier": "full",
             "allow_children": True,
         },
     )

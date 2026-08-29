@@ -238,7 +238,7 @@ type ShareGrants = {
   allow_docpacks: boolean;
 };
 
-type ShareTier = "preview" | "review" | "supplier";
+type ShareTier = "preview" | "review" | "full";
 
 const SHARE_TIERS: Record<ShareTier, { label: string; hint: string; grants: ShareGrants }> = {
   preview: {
@@ -265,8 +265,8 @@ const SHARE_TIERS: Record<ShareTier, { label: string; hint: string; grants: Shar
       allow_docpacks: false,
     },
   },
-  supplier: {
-    label: "Supplier",
+  full: {
+    label: "Full access",
     hint: "Adds STEP/DXF, every file, and Doc Packs.",
     grants: {
       allow_drawings: true,
@@ -2977,7 +2977,7 @@ function isExternalDatasheetUrl(url: string): boolean {
 
             {showFilesTab && <TabPanel header={tabHeader("Files", "pi-paperclip")}>
               <div className="d-flex flex-column gap-3">
-                {!canFilesRead && (
+                {!isSharedView && !canFilesRead && (
                   <div className="alert alert-secondary mb-0">
                     You need the files.read permission to view files for this part.
                   </div>
@@ -3089,6 +3089,9 @@ function isExternalDatasheetUrl(url: string): boolean {
               <NeedsData onNeeded={requestDocOpts} />
               {docError ? <div className="alert alert-danger mt-3" role="alert">{docError}</div> : null}
               {(() => {
+                // A shared link has no signed-in user to hold permissions;
+                // reaching this tab at all means the link granted Doc Packs.
+                if (isSharedView) return null;
                 const docpackMissing: string[] = [];
                 if (!canExport) docpackMissing.push("exports.run");
                 if (!canBomRead) docpackMissing.push("bom.read");
@@ -3100,7 +3103,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                   </div>
                 );
               })()}
-              {canExport && canBomRead && canFilesRead && <>
+              {(isSharedView ? sharedAllowsDocpacks : canExport && canBomRead && canFilesRead) && <>
               <div className="pd-card p-3 mt-3">
                 <h6 className="mb-3">Scope</h6>
                 <div className="row g-4">

@@ -93,7 +93,7 @@ def _create_share(client, part, **options):
     payload = {
         "rev": part.revision,
         "expires_in_days": 30,
-        "tier": "supplier",
+        "tier": "full",
         **options,
     }
     response = client.post(

@@ -225,7 +225,7 @@ Each level adds to that floor:
 |---|---|
 | **Preview** | nothing — images and the 3D viewer only |
 | **Review** | drawings (drawing PNG and PDF), datasheets, part attributes |
-| **Supplier** | the above plus STEP/DXF/eDrawings, all associated files, and Doc Packs |
+| **Full access** | the above plus STEP/DXF/eDrawings, all associated files, and Doc Packs |
 
 **Customise what this level grants** opens the individual switches behind the
 levels, so you can build a combination no level covers — a datasheet with no
@@ -265,6 +265,7 @@ The shared page only shows sections the link can fill:
 | **Attributes** tab | Attributes granted |
 | **Files** tab | any download is granted — Drawings, Neutral CAD, Datasheets or All files |
 | **Doc Packs** tab | Doc Packs granted |
+| **Attributes**, **Files**, **Doc Packs** content | the grant alone — a shared link has no account, so no permission notice ever appears on one |
 | **BOM** table | Include BOM children ticked |
 
 At the Preview level there is no **Files** tab: the link grants no downloads, so

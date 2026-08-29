@@ -104,7 +104,7 @@ def test_share_levels_gate_file_groups(client, app, tmp_path):
 
     assert groups_for(tier="preview") == {"png", "ply"}
     assert groups_for(tier="review") == {"png", "png-dwg", "ply", "pdf", "datasheet"}
-    assert groups_for(tier="supplier") == {
+    assert groups_for(tier="full") == {
         "png",
         "png-dwg",
         "ply",
@@ -121,7 +121,10 @@ def test_share_levels_gate_file_groups(client, app, tmp_path):
         "ply",
         "datasheet",
     }
-    assert groups_for(tier="supplier", allow_neutral_cad=False) == {
+    # "supplier" was the shipped name for the widest level; the wire value has
+    # to keep resolving now the UI calls it Full access.
+    assert groups_for(tier="supplier") == groups_for(tier="full")
+    assert groups_for(tier="full", allow_neutral_cad=False) == {
         "png",
         "png-dwg",
         "ply",

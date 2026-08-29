@@ -153,6 +153,11 @@ def _surface(app, created):
         "child_reachable": public.get(
             f"{base}/part_detail?pn={CHILD}&rev={REV}"
         ).status_code,
+        # The page hides whole sections on these, and a public viewer has no
+        # permissions of their own, so the link's grants have to answer.
+        "can_files_read": detail["can_files_read"],
+        "can_bom_read": detail["can_bom_read"],
+        "can_export": detail["can_export"],
         "docpack_options": options.status_code,
         "docpack_types": (
             sorted(options.get_json()["file_types"])
@@ -192,6 +197,9 @@ def test_preview_level_surface(client, app, tmp_path):
     assert s["bom_flat"] == 0
     assert s["child_reachable"] == 404
     assert s["docpack_options"] == 403
+    assert s["can_files_read"] is True
+    assert s["can_bom_read"] is False
+    assert s["can_export"] is False
 
 
 def test_review_level_surface(client, app, tmp_path):
@@ -213,12 +221,12 @@ def test_review_level_surface(client, app, tmp_path):
     assert s["docpack_options"] == 403
 
 
-def test_supplier_level_surface(client, app, tmp_path):
+def test_full_access_level_surface(client, app, tmp_path):
     """Everything, including the BOM - and the internal upload still never."""
 
-    _admin(client, "surface-supplier@example.com")
+    _admin(client, "surface-full@example.com")
     _assembly(app, tmp_path)
-    s = _surface(app, _make(client, tier="supplier", allow_children=True))
+    s = _surface(app, _make(client, tier="full", allow_children=True))
 
     assert s["images"] == 1 and s["drawings"] == 1
     assert s["groups"] == ["datasheet", "dxf", "edr", "pdf", "ply", "step"]
@@ -237,6 +245,14 @@ def test_supplier_level_surface(client, app, tmp_path):
     assert s["docpack_options"] == 200
     assert "step" in s["docpack_types"]
 
+    # The Doc Packs form is gated on these three. They were absent from the
+    # public payload, so they read as false and the tab rendered "You're
+    # missing permission(s): exports.run, bom.read, files.read" in place of
+    # the form - on a link that had explicitly granted doc packs.
+    assert s["can_files_read"] is True
+    assert s["can_bom_read"] is True
+    assert s["can_export"] is True
+
 
 def test_children_grant_is_independent_of_the_level(client, app, tmp_path):
     """Which PARTS a link reaches is a separate axis from what it shows."""
@@ -254,10 +270,10 @@ def test_children_grant_is_independent_of_the_level(client, app, tmp_path):
     assert preview_with_children["groups"] == ["ply"]
     assert preview_with_children["drawings"] == 0
 
-    supplier_no_children = _surface(app, _make(client, tier="supplier"))
-    assert supplier_no_children["bom_roots"] == 0
-    assert supplier_no_children["child_reachable"] == 404
-    assert "step" in supplier_no_children["groups"]
+    full_no_children = _surface(app, _make(client, tier="full"))
+    assert full_no_children["bom_roots"] == 0
+    assert full_no_children["child_reachable"] == 404
+    assert "step" in full_no_children["groups"]
 
 
 def test_every_grant_moves_exactly_one_thing(client, app, tmp_path):
