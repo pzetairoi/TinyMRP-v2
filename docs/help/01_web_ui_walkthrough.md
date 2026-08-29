@@ -265,11 +265,17 @@ The shared page only shows sections the link can fill:
 | **Attributes** tab | Attributes granted |
 | **Files** tab | any download is granted — Drawings, Neutral CAD, Datasheets or All files |
 | **Doc Packs** tab | Doc Packs granted |
-| **Attributes**, **Files**, **Doc Packs** content | the grant alone — a shared link has no account, so no permission notice ever appears on one |
 | **BOM** table | Include BOM children ticked |
 
 At the Preview level there is no **Files** tab: the link grants no downloads, so
 the tab would list only the image and the mesh the viewer is already showing.
+
+A shared link carries no account, so the recipient never sees a message about
+missing permissions. What the link grants is the whole answer — if a section is
+there, they can use it.
+
+**Doc Packs** does not need **Include BOM children**. Without children the pack
+covers this part alone, which is usually what a single-part enquiry wants.
 
 Doc Packs at the Preview level cannot contain PNGs. A pack picks files by type,
 and a preview image and a drawing export are the same type — so a link that may
