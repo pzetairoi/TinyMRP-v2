@@ -431,3 +431,55 @@ def test_help_still_promises_ordering_at_every_bom_level():
         "Leaf components",
     ):
         assert promise in help_html
+
+def test_help_documents_the_controls_the_job_page_renders():
+    """Workflow B names five filters and a select-all; all six must exist."""
+
+    template = _job_form_template()
+    for control in (
+        "remaining-filter-pn",
+        "remaining-filter-desc",
+        "remaining-filter-rev",
+        "remaining-filter-level",
+        "remaining-filter-qty-min",
+        "remaining-select-all",
+    ):
+        assert control in template, control
+    # The help promises the selection survives a filter change but is cleared
+    # by the Flat/Tree toggle. Only setRemainingView may clear the boxes.
+    view_toggle = template.split("function setRemainingView")[1].split("function ")[0]
+    assert "remaining-select" in view_toggle and "checked = false" in view_toggle
+    apply_filters = template.split("function applyRemainingFilters")[1].split("function ")[0]
+    assert "input.remaining-select-all" in apply_filters
+    assert "input.remaining-select'" not in apply_filters
+
+
+def test_help_worked_example_matches_the_rollup_it_describes(client):
+    """The numbers printed in Workflow B are the numbers the code produces."""
+
+    _login(client, _user("worked-example@ordering.test", "administrator"))
+
+    # Two roots, one nested inside the other, exactly as the help's table says.
+    for pn in ("TRAILER", "FRAME", "PLATE"):
+        _part(pn, "A")
+    BOMLink(parent_pn="TRAILER", parent_rev="A", child_pn="FRAME", child_rev="A", qty=1).save()
+    BOMLink(parent_pn="FRAME", parent_rev="A", child_pn="PLATE", child_rev="A", qty=2).save()
+    job = Job(job_number="JOB-WORKED", title="Worked example").save()
+    job.bom = [JobBOMLine(pn="TRAILER", rev="A", qty=2), JobBOMLine(pn="FRAME", rev="A", qty=1)]
+    job.save()
+
+    html = client.get(f"/admin/jobs/{job.id}").get_data(as_text=True)
+    flat = _rows(html, view="flat")
+    tree = _rows(html, view="tree")
+
+    # "two trailers each containing one core frame, plus one spare frame, makes
+    # CV03-F01 required three times"
+    assert flat["FRAME"] == 3.0
+    # "each JOIN PLATE inside that frame (two per frame) is required six times"
+    assert flat["PLATE"] == 6.0
+    # "+.01 is the first job root, +.02 the second, and each further segment
+    # steps down one BOM level"
+    levels = dict(sorted(tree["PLATE"]))
+    assert levels == {"+.01.01.01": 4.0, "+.02.01": 2.0}
+    # Tree occurrences add up to the flat line the buyer orders from.
+    assert sum(levels.values()) == flat["PLATE"]

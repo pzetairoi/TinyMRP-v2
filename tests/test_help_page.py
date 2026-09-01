@@ -1,3 +1,5 @@
+import re
+
 from app.models.auth import Role
 
 
@@ -162,9 +164,26 @@ def test_help_screenshots_are_present_and_captioned(client, app, user):
     images = Path(app.static_folder) / "help" / "img"
 
     assert '<figure class="help-figure">' in body
-    for name in ("inventory", "import", "roles", "customer-portal"):
+    for name in (
+        "inventory",
+        "import",
+        "roles",
+        "customer-portal",
+        "job-ordering-flat",
+        "job-ordering-tree",
+        "job-ordering-select",
+        "job-ordering-new-order",
+        "job-ordering-coverage",
+        "job-ordering-readonly",
+    ):
         assert f"/static/help/img/{name}.png" in body, name
         assert (images / f"{name}.png").is_file(), name
+    # Every image the page references must actually resolve, or the reader gets
+    # a broken frame where the explanation should be.
+    referenced = set(re.findall(r'src="/static/help/img/([^"]+)"', body))
+    assert referenced
+    missing = sorted(name for name in referenced if not (images / name).is_file())
+    assert missing == []
     # Every figure carries a caption element.
     assert body.count('<figure class="help-figure">') == body.count(
         '<figcaption class="help-figure-caption">'

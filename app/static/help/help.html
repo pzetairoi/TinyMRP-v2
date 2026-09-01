@@ -1821,26 +1821,106 @@ someone with <code>imports.override_approved</code> to tick “also approved”.
 </li>
 </ul>
 </div></details><details class="help-section" id="sec-workflow-b-progressive-ordering-across-multi-level-bom"><summary><span class="help-section-title" id="workflow-b-progressive-ordering-across-multi-level-bom">Workflow B: Progressive Ordering Across Multi-Level BOM</span></summary><div class="help-section-body">
-<p>This is the key purchasing workflow for complex assemblies.</p>
+<p>This is the key purchasing workflow for complex assemblies. You put a small
+number of <em>roots</em> on a job, TinyMRP explodes them into every part underneath,
+and you then buy that demand in whatever batches suit your suppliers — a
+sub-assembly here, a box of brackets there — while the job keeps score.</p>
+<p><strong>The worked example below.</strong> <code>JOB-2026-014</code> builds two CELLV03 trailers and one
+spare core frame:</p>
+<table>
+<thead>
+<tr>
+<th>Job BOM root</th>
+<th>Rev</th>
+<th>Qty</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CV03-TR-A01</code></td>
+<td>A</td>
+<td>2</td>
+<td>Complete trailer</td>
+</tr>
+<tr>
+<td><code>CV03-F01</code></td>
+<td>A</td>
+<td>1</td>
+<td>Core frame, bought as a spare</td>
+</tr>
+</tbody>
+</table>
+<p>Two lines. But <code>CV03-F01</code> also sits <em>inside</em> <code>CV03-TR-A01</code>, so the frame parts
+are required through two different parents, and the job's real demand is 43
+part/revision pairs across four BOM levels. That is the situation this workflow
+exists for.</p>
 <h3 id="1-create-job-bom-roots">1) Create job BOM roots</h3>
 <ul>
-<li>In <code>Jobs</code>, define BOM lines that represent the job scope.</li>
-<li>Roots can expand into full multi-level BOM via server rollup logic.</li>
+<li>In <code>Jobs</code>, open a job and add BOM lines that represent the job scope.</li>
+<li>Add them by typing <code>part,revision,quantity</code> per line, or with Inventory pick
+mode.</li>
+<li>Leave the revision blank to follow the part rather than pin the job to one
+revision. A blank resolves to the most recently updated record for that part
+number, so the job moves with the part when engineering releases a change.</li>
+<li>Roots expand into the full multi-level BOM automatically. You do <strong>not</strong> list
+the children — adding them by hand would double-count the demand.</li>
 </ul>
+<p>Quantities multiply down the tree. Two trailers each containing one core frame,
+plus one spare frame, makes <code>CV03-F01</code> required three times; each <code>JOIN PLATE</code>
+inside that frame (two per frame) is required six times.</p>
 <h3 id="2-review-ordering-coverage-in-job">2) Review ordering coverage in Job</h3>
-<p>In Job detail you have three purchasing views:</p>
+<p>Open the job and scroll past the BOM editor. There are three purchasing tables,
+and each one is the <em>whole</em> exploded requirement, not just the roots:</p>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Shows</th>
+<th>Read it when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Parts in Orders</code></td>
+<td>Required vs ordered, with links to the orders</td>
+<td>Checking what is already covered and by whom</td>
+</tr>
+<tr>
+<td><code>Over-Ordered Parts</code></td>
+<td>Quantities ordered above requirement</td>
+<td>Reconciling mixed sourcing</td>
+</tr>
+<tr>
+<td><code>Parts Not Yet Ordered</code></td>
+<td>Outstanding demand, selectable</td>
+<td>Raising the next purchase order</td>
+</tr>
+</tbody>
+</table>
+<p>Every row carries the same four numbers:</p>
 <ul>
-<li><code>Parts in Orders</code>: required vs ordered by part.</li>
-<li><code>Over-Ordered Parts</code>: quantities ordered above required.</li>
-<li><code>Parts Not Yet Ordered</code>: remaining demand.</li>
+<li><strong>Required</strong> — what the job needs, after multiplying quantities down the tree.</li>
+<li><strong>Ordered</strong> — what non-draft purchase orders on this job already cover.</li>
+<li><strong>Remaining</strong> — <code>Required − Ordered</code>, floored at zero.</li>
+<li><strong>Over</strong> — <code>Ordered − Required</code> when you have bought more than you need.</li>
 </ul>
 <h3 id="3-use-parts-not-yet-ordered-in-flat-or-tree-mode">3) Use <code>Parts Not Yet Ordered</code> in Flat or Tree mode</h3>
-<ul>
-<li><code>Flat BOM</code> view: aggregated by part/revision.</li>
-<li><code>Tree BOM</code> view: per occurrence with BOM level path.</li>
-<li>Toggle between modes depending on purchasing strategy.</li>
-</ul>
-<p>This allows ordering:</p>
+<p><code>Flat BOM</code> aggregates by part and revision: one row per thing you can buy, with
+demand from every parent already added together. This is the buying view.</p>
+<figure class="help-figure"><img src="/static/help/img/job-ordering-flat.png" alt="Parts Not Yet Ordered in Flat BOM mode. Every level of the job is here — the CORE FRAME sub-assembly and the channel and plate parts inside it sit alongside the bought-in hitch and reflectors. CV03-F01 shows 3.00 required: two through the trailers, one as a spare." /><figcaption class="help-figure-caption">Parts Not Yet Ordered in Flat BOM mode. Every level of the job is here — the CORE FRAME sub-assembly and the channel and plate parts inside it sit alongside the bought-in hitch and reflectors. CV03-F01 shows 3.00 required: two through the trailers, one as a spare.</figcaption></figure>
+<p><code>Tree BOM</code> splits the same demand back into occurrences and shows where each one
+came from. The <code>Level</code> column is a path: <code>+.01</code> is the first job root, <code>+.02</code> the
+second, and each further segment steps down one BOM level.</p>
+<figure class="help-figure"><img src="/static/help/img/job-ordering-tree.png" alt="The same job in Tree BOM mode, filtered to CV03-TR-0. CV03-TR-01 appears twice: 2.00 at level +.01.07.03.01, inside the frame inside the trailers, and 1.00 at +.02.01, inside the spare frame. Those are the two occurrences the Flat view added together into 3.00." /><figcaption class="help-figure-caption">The same job in Tree BOM mode, filtered to CV03-TR-0. CV03-TR-01 appears twice: 2.00 at level +.01.07.03.01, inside the frame inside the trailers, and 1.00 at +.02.01, inside the spare frame. Those are the two occurrences the Flat view added together into 3.00.</figcaption></figure>
+<p>Use <strong>Flat</strong> to raise orders — it is the quantity you actually buy. Use <strong>Tree</strong>
+to answer &quot;why do I need six of these?&quot; before you commit.</p>
+<p>Five filters narrow either table: part number, description, revision, level
+(tree only) and a minimum remaining quantity. All four text filters match
+anywhere in the value and ignore case. Because every level path starts at a job
+root, typing <code>+.02</code> in <code>Level</code> isolates that root's whole subtree — 25 rows in
+this example — and <code>+.01.07.03</code> narrows to one sub-assembly.</p>
+<p>This allows ordering at any level:</p>
 <ul>
 <li>Top-level assemblies</li>
 <li>Intermediate subassemblies</li>
@@ -1850,11 +1930,24 @@ someone with <code>imports.override_approved</code> to tick “also approved”.
 consolidate the same component wherever it appears in the job.</p>
 <h3 id="4-create-order-from-selected-remaining-parts">4) Create order from selected remaining parts</h3>
 <ol>
-<li>Filter remaining table.</li>
-<li>Select rows (supports select-all on visible rows).</li>
+<li>Filter the remaining table to the group you want to buy.</li>
+<li>Select rows. The checkbox in the header row selects everything still visible
+under the current filter, so filter first, then select.</li>
 <li>Click <code>Create purchase order from selected</code>.</li>
 <li>Review and edit the generated order lines.</li>
 </ol>
+<p>Two things about the selection are worth knowing. It <strong>survives a change of
+filter</strong>, which is how you gather one order from several searches — filter
+<code>HANGER</code>, select, then filter <code>CHANNEL</code>, select again, and both are still
+selected when you click the button. It is <strong>cleared by switching Flat and
+Tree</strong>, because the two views count the same demand differently and mixing them
+would double up the quantities.</p>
+<figure class="help-figure"><img src="/static/help/img/job-ordering-select.png" alt="Filtering the description to PLATE and using the header checkbox to take every visible row. Nine rows from three different BOM levels, with the quantities already consolidated — 6.00 of the JOIN PLATE, 2.00 of the registration plate. Check what the filter caught: the ADR Registration Plate Lamp is a light, not plate stock." /><figcaption class="help-figure-caption">Filtering the description to PLATE and using the header checkbox to take every visible row. Nine rows from three different BOM levels, with the quantities already consolidated — 6.00 of the JOIN PLATE, 2.00 of the registration plate. Check what the filter caught: the ADR Registration Plate Lamp is a light, not plate stock.</figcaption></figure>
+<p>The order arrives as a <strong>draft</strong> purchase order against the job, with one line
+per selected row, quantity pre-filled to the remaining quantity, and the job's
+customer copied across. Nothing is priced yet — set unit prices, adjust
+quantities to the supplier's pack sizes, choose the supplier, and save.</p>
+<figure class="help-figure"><img src="/static/help/img/job-ordering-new-order.png" alt="The generated draft purchase order. Each selected row became one line at its remaining quantity; prices and supplier are yours to fill in." /><figcaption class="help-figure-caption">The generated draft purchase order. Each selected row became one line at its remaining quantity; prices and supplier are yours to fill in.</figcaption></figure>
 <p>The selection is re-checked on the server against the same exploded job
 requirement the page rendered. A part that is not in the job's tree, or a
 revision you are not cleared to see, is refused rather than silently added.</p>
@@ -1863,6 +1956,90 @@ revision you are not cleared to see, is refused rather than silently added.</p>
 <li>Each new non-draft purchase order updates coverage.</li>
 <li>Job rollup recalculates required, ordered, remaining, and over quantities.</li>
 </ul>
+<p>A draft order changes nothing. Move it to <code>submitted</code> or beyond and the parts
+move out of <code>Parts Not Yet Ordered</code> and into <code>Parts in Orders</code>.</p>
+<figure class="help-figure"><img src="/static/help/img/job-ordering-coverage.png" alt="The same job after the plate order was submitted. The nine parts now sit in Parts in Orders at 0.00 remaining, each linked to PO-2026-001, and the rest of the job continues below in Parts Not Yet Ordered." /><figcaption class="help-figure-caption">The same job after the plate order was submitted. The nine parts now sit in Parts in Orders at 0.00 remaining, each linked to PO-2026-001, and the rest of the job continues below in Parts Not Yet Ordered.</figcaption></figure>
+<p>Repeat with the next commodity group — channel, fasteners, the bought-in running
+gear — until the remaining table is empty.</p>
+<h3 id="who-can-do-this">Who can do this</h3>
+<p>Creating an order from a job needs <code>orders.create</code>; among the shipped roles that
+means <strong>Administrator</strong> and <strong>Commercial</strong>. Everyone with <code>jobs.read</code> sees the
+same tables and the same numbers, so engineering and the workshop can check
+coverage without being able to commit spend.</p>
+<table>
+<thead>
+<tr>
+<th>Role on <code>JOB-2026-014</code></th>
+<th>Sees the tables</th>
+<th>Rows</th>
+<th><code>Create purchase order</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Administrator</td>
+<td>Yes</td>
+<td>43</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Commercial</td>
+<td>Yes</td>
+<td>41</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Engineering Manager</td>
+<td>Yes</td>
+<td>43</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Engineering, Auditor</td>
+<td>Yes</td>
+<td>43</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Internal, Workshop</td>
+<td>Yes</td>
+<td>41</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Customer (portal)</td>
+<td>Their own job</td>
+<td>36</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Supplier (portal)</td>
+<td>Only jobs they have a purchase order on</td>
+<td>—</td>
+<td>No</td>
+</tr>
+</tbody>
+</table>
+<figure class="help-figure"><img src="/static/help/img/job-ordering-readonly.png" alt="The same section for a role without orders.create. The tables, filters and Flat/Tree toggle are all there; the button to raise an order is not." /><figcaption class="help-figure-caption">The same section for a role without orders.create. The tables, filters and Flat/Tree toggle are all there; the button to raise an order is not.</figcaption></figure>
+<p>The row counts differ because the part scope differs, not because the job does.
+Two parts in this dataset are deliberately unapproved, so roles without
+<code>parts.read_unreleased</code> see 41 rather than 43. The customer sees 36: approval
+stops traversal for a portal user, so the unapproved frame also takes with it
+the five parts reachable only through it — while the core frame, being a job
+root in its own right, keeps its whole subtree visible.</p>
+<h3 id="if-a-part-you-expected-is-missing">If a part you expected is missing</h3>
+<ol>
+<li><strong>It is already covered.</strong> Check <code>Parts in Orders</code> before assuming it is
+gone; a part drops out of the remaining table when remaining reaches zero.</li>
+<li><strong>A parent was bought.</strong> Ordering an assembly covers everything inside it.</li>
+<li><strong>It is unapproved.</strong> Without <code>parts.read_unreleased</code> an unapproved revision
+is invisible, and for portal users it also hides everything reachable only
+through it.</li>
+<li><strong>It belongs to another job.</strong> Coverage is per job. A part ordered against a
+different job does not count here.</li>
+<li><strong>The BOM link is missing.</strong> The job explodes the <em>part</em> BOM. If a child is
+absent from the tree, check the parent's BOM tab.</li>
+</ol>
 </div></details><details class="help-section" id="sec-understanding-over-ordered-behavior"><summary><span class="help-section-title" id="understanding-over-ordered-behavior">Understanding Over-Ordered Behavior</span></summary><div class="help-section-body">
 <p>Over-order is expected in mixed sourcing scenarios. Example:</p>
 <ol>
