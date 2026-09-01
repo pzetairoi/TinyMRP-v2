@@ -142,6 +142,19 @@ def calculate_order_totals(lines: Iterable[OrderLine]) -> Tuple[float, float, fl
     return subtotal, tax_total, discount_total
 
 
+def supplies_job_requirement(order) -> bool:
+    """Whether an order linked to a job covers that job's requirement.
+
+    A job's BOM explosion is demand, and only procurement covers demand. The
+    sales order a job is built for is the same demand seen from the customer
+    side, so counting it as coverage reported every part in the tree as already
+    bought. Anything not explicitly sales is a purchase, matching the model
+    default so legacy rows without a kind still count.
+    """
+
+    return str(getattr(order, "kind", "") or "purchase").strip().lower() != "sales"
+
+
 def consolidate_order_lines(lines: Iterable[OrderLine]) -> list[OrderLine]:
     merged: dict[tuple[str, str], OrderLine] = {}
     for line in lines or []:

@@ -74,16 +74,23 @@ This allows ordering:
 - Intermediate subassemblies
 - Leaf components
 
+Rows from different parents can be selected together, so one purchase order can
+consolidate the same component wherever it appears in the job.
+
 ### 4) Create order from selected remaining parts
 
 1. Filter remaining table.
 2. Select rows (supports select-all on visible rows).
-3. Click `Create order from selected`.
+3. Click `Create purchase order from selected`.
 4. Review and edit the generated order lines.
+
+The selection is re-checked on the server against the same exploded job
+requirement the page rendered. A part that is not in the job's tree, or a
+revision you are not cleared to see, is refused rather than silently added.
 
 ### 5) Repeat until remaining demand is zero
 
-- Each new non-draft order updates coverage.
+- Each new non-draft purchase order updates coverage.
 - Job rollup recalculates required, ordered, remaining, and over quantities.
 
 ## Understanding Over-Ordered Behavior
@@ -98,6 +105,9 @@ TinyMRP shows these in `Over-Ordered Parts` to make the conflict explicit.
 
 ## Order Lifecycle Notes
 
+- Only purchase orders cover a job's requirement. A sales order on the job is
+  the customer demand the job exists to fulfil, so it is listed under `Related
+  Orders` but never counted as parts already bought.
 - `Draft` and `Cancelled` orders are excluded from job ordered coverage.
 - Confirmed/delivered quantities drive received progress in job list metrics.
 

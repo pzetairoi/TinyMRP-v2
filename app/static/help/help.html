@@ -1846,16 +1846,21 @@ someone with <code>imports.override_approved</code> to tick “also approved”.
 <li>Intermediate subassemblies</li>
 <li>Leaf components</li>
 </ul>
+<p>Rows from different parents can be selected together, so one purchase order can
+consolidate the same component wherever it appears in the job.</p>
 <h3 id="4-create-order-from-selected-remaining-parts">4) Create order from selected remaining parts</h3>
 <ol>
 <li>Filter remaining table.</li>
 <li>Select rows (supports select-all on visible rows).</li>
-<li>Click <code>Create order from selected</code>.</li>
+<li>Click <code>Create purchase order from selected</code>.</li>
 <li>Review and edit the generated order lines.</li>
 </ol>
+<p>The selection is re-checked on the server against the same exploded job
+requirement the page rendered. A part that is not in the job's tree, or a
+revision you are not cleared to see, is refused rather than silently added.</p>
 <h3 id="5-repeat-until-remaining-demand-is-zero">5) Repeat until remaining demand is zero</h3>
 <ul>
-<li>Each new non-draft order updates coverage.</li>
+<li>Each new non-draft purchase order updates coverage.</li>
 <li>Job rollup recalculates required, ordered, remaining, and over quantities.</li>
 </ul>
 </div></details><details class="help-section" id="sec-understanding-over-ordered-behavior"><summary><span class="help-section-title" id="understanding-over-ordered-behavior">Understanding Over-Ordered Behavior</span></summary><div class="help-section-body">
@@ -1868,6 +1873,8 @@ someone with <code>imports.override_approved</code> to tick “also approved”.
 <p>TinyMRP shows these in <code>Over-Ordered Parts</code> to make the conflict explicit.</p>
 </div></details><details class="help-section" id="sec-order-lifecycle-notes"><summary><span class="help-section-title" id="order-lifecycle-notes">Order Lifecycle Notes</span></summary><div class="help-section-body">
 <ul>
+<li>Only purchase orders cover a job's requirement. A sales order on the job is
+the customer demand the job exists to fulfil, so it is listed under <code>Related Orders</code> but never counted as parts already bought.</li>
 <li><code>Draft</code> and <code>Cancelled</code> orders are excluded from job ordered coverage.</li>
 <li>Confirmed/delivered quantities drive received progress in job list metrics.</li>
 </ul>
@@ -2204,8 +2211,12 @@ with the part number so it can be cleaned up.</p>
 <ol>
 <li>Confirm the job BOM matches the part BOM you expect — they are separate, and
 the job BOM is a snapshot you can edit.</li>
-<li><em>Parts not yet ordered</em> and <em>over-ordered</em> compare ordered quantity against
-job requirement. A part ordered against a different job will not count here.</li>
+<li><em>Parts not yet ordered</em> and <em>over-ordered</em> compare purchased quantity against
+job requirement. A part ordered against a different job will not count here,
+and neither will the sales order the job is being built for.</li>
+<li>If children are missing from the tables, check the parts are approved — an
+unapproved revision stops the walk for anyone without
+<code>parts.read_unreleased</code>, so its children disappear with it.</li>
 <li>Financial columns may be blank because you lack <code>orders.financial.read</code>,
 not because the data is missing.</li>
 </ol>

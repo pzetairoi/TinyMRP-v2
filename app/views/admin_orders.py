@@ -39,7 +39,9 @@ from app.services.biz_utils import (
     can_transition_order,
     consolidate_order_lines,
     generate_order_number,
+    supplies_job_requirement,
 )
+from app.views.admin_jobs import job_orderable_keys
 from app.services.order_scope import build_scope_pdf, build_scope_zip
 from app.services.export_security import (
     ExportSecurityError,
@@ -848,25 +850,19 @@ def orders_from_job(job_id):
     if not parts:
         flash("Select at least one part to create the order.", "error")
         return redirect(url_for("admin_jobs.jobs_edit", job_id=job.id))
-    try:
-        job_customer = job.customer if job.customer else None
-    except DoesNotExist:
-        job_customer = None
-    o = Order(
-        order_number=generate_order_number("purchase"),
-        kind="purchase",
-        status="draft",
-        job=job,
-        customer=job_customer,
-        order_date=utc_now(),
-        currency="USD",
-    )
+    # Any level of the job's tree is orderable, and nothing outside it is. The
+    # selection arrives as form data, so authorise it against the same exploded
+    # requirement the job page rendered rather than trusting it - and do so
+    # before allocating an order number.
+    orderable = job_orderable_keys(job, current_user)
     lines = []
     for p in parts:
         pn = _canonical_pn(p.get("pn") or "")
         if not pn:
             continue
         rev = clean_rev(p.get("rev") or "")
+        if (pn.strip().lower(), rev.lower()) not in orderable:
+            abort(404)
         try:
             qty = float(p.get("qty") or 1.0)
         except Exception:
@@ -884,6 +880,19 @@ def orders_from_job(job_id):
     if not lines:
         flash("No valid parts to create the order.", "error")
         return redirect(url_for("admin_jobs.jobs_edit", job_id=job.id))
+    try:
+        job_customer = job.customer if job.customer else None
+    except DoesNotExist:
+        job_customer = None
+    o = Order(
+        order_number=generate_order_number("purchase"),
+        kind="purchase",
+        status="draft",
+        job=job,
+        customer=job_customer,
+        order_date=utc_now(),
+        currency="USD",
+    )
     o.lines = consolidate_order_lines(lines)
     subtotal, tax_total, discount_total = calculate_order_totals(o.lines)
     o.subtotal = subtotal
@@ -917,7 +926,7 @@ def _total_ordered_for_job(job: Job, pn: str, rev: str) -> float:
     if getattr(current_user, "is_authenticated", False):
         queryset = scope_queryset(queryset, current_user, "orders")
     for o in queryset:
-        if (o.status or "") == "draft":
+        if (o.status or "") == "draft" or not supplies_job_requirement(o):
             continue
         for l in (o.lines or []):
             if (l.pn or '').strip().lower() == (pn or '').lower() and clean_rev(l.rev) == clean_rev(rev):

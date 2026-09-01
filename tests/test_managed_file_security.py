@@ -229,7 +229,9 @@ def test_customer_portal_job_updates_refresh_parts_and_thumbnail_access(
     assert "Related Orders" in job_body
     assert sales_order.order_number in job_body
     assert hidden_purchase_order.order_number not in job_body
-    assert "Parts in Orders" in job_body
+    # The customer's own sales order is this job's demand, not supply against
+    # it, so the job BOM is still entirely outstanding procurement.
+    assert "Parts in Orders" not in job_body
     assert "Parts Not Yet Ordered" in job_body
     assert first.part_number in job_body
     assert added.part_number in job_body

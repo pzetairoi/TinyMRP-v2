@@ -7,6 +7,31 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ### Fixed
 
+- **Job ordering can reach the whole BOM again.** The read-only job detail page
+  authorised the exploded multi-level requirement against a set that only ever
+  held the job's own BOM lines, so every descendant was discarded: purchasing
+  could see and order the parts assigned to the job and nothing beneath them.
+  The page now authorises the whole explosion, exactly as the editable page
+  always did, and `Parts Not Yet Ordered` again offers top-level assemblies,
+  intermediate subassemblies and leaf components in both Flat and Tree mode —
+  so one purchase order can consolidate a component drawn from several parents.
+  Users on a customer, supplier or assigned-job scope were never affected.
+- **A job's sales order is no longer counted as parts already bought.** Every
+  order linked to a job was exploded down the BOM and credited as coverage,
+  including the customer order the job exists to fulfil. One sales order for the
+  end product therefore reported the entire tree as procured and emptied the
+  remaining list. Coverage now comes from purchase orders only; the sales order
+  still appears under `Related Orders`. Buying a parent still covers its
+  children, which is the documented over-ordering behaviour.
+
+### Security
+
+- **A selection posted from a job is authorised, not trusted.** Creating a
+  purchase order from a job accepted whatever part lines the form carried once
+  the job itself was in scope. The posted parts are now checked against the same
+  exploded, permission-filtered requirement the page rendered, so a part outside
+  the job's tree — or a revision the caller may not see — is refused.
+
 - **Parts may share one datasheet.** A vendor catalogue covers a family of
   parts, so several part/revision pairs legitimately name the same PDF — but
   `PartFile.path` was globally unique, so the second record was an E11000

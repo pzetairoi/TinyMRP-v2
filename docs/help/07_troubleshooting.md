@@ -115,9 +115,13 @@ with the part number so it can be cleaned up.
 
 1. Confirm the job BOM matches the part BOM you expect — they are separate, and
    the job BOM is a snapshot you can edit.
-2. *Parts not yet ordered* and *over-ordered* compare ordered quantity against
-   job requirement. A part ordered against a different job will not count here.
-3. Financial columns may be blank because you lack `orders.financial.read`,
+2. *Parts not yet ordered* and *over-ordered* compare purchased quantity against
+   job requirement. A part ordered against a different job will not count here,
+   and neither will the sales order the job is being built for.
+3. If children are missing from the tables, check the parts are approved — an
+   unapproved revision stops the walk for anyone without
+   `parts.read_unreleased`, so its children disappear with it.
+4. Financial columns may be blank because you lack `orders.financial.read`,
    not because the data is missing.
 
 ## The add-in cannot connect

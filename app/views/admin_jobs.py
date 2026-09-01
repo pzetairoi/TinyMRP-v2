@@ -32,7 +32,7 @@ from app.models.part import Part
 from app.models.bom import BOMLink
 from app.services.attrs import harvest_part_attrs
 from app.services.thumbs import thumb_urls_for
-from app.services.biz_utils import generate_job_number
+from app.services.biz_utils import generate_job_number, supplies_job_requirement
 from app.services.part_norm import clean_rev
 from app.services.timezone_utils import parse_user_datetime, utc_now
 
@@ -346,7 +346,7 @@ def _job_order_coverage(
 
     for o in _orders_for_job(job):
         status = (o.status or "").strip().lower()
-        if status in ("draft", "cancelled"):
+        if status in ("draft", "cancelled") or not supplies_job_requirement(o):
             continue
         href = ""
         if include_links:
@@ -389,6 +389,51 @@ def _job_order_coverage(
     return ordered_map, display_map, order_links
 
 
+def _authorised_requirement_keys(required_map, display_map, user, allowed_pairs=None):
+    """Which exploded requirement keys this user may see and order.
+
+    ``allowed_pairs`` may only be supplied when it already covers descendants,
+    as the relationship scope does. The global-scope fallback authorises the
+    job's own BOM lines only, so it must be left to this function to authorise
+    the whole explosion instead.
+    """
+
+    allowed = allowed_pairs
+    if allowed is None:
+        allowed = authorised_part_pairs(
+            user,
+            [display_map.get(key, key) for key in required_map],
+        )
+    return {
+        key
+        for key in required_map
+        if (
+            str(display_map.get(key, key)[0] or "").strip().casefold(),
+            str(display_map.get(key, key)[1] or "").strip().casefold(),
+        )
+        in allowed
+    }
+
+
+def job_orderable_keys(job: Job, user) -> set[Tuple[str, str]]:
+    """Every part key the job page offers this user, at any BOM level.
+
+    The order endpoint authorises against this, so a posted selection is
+    accepted exactly when the remaining tables could have offered it.
+    """
+
+    required_map, display_map, _ = _job_required_structure(job)
+    if not required_map:
+        return set()
+    allowed_pairs = relationship_job_part_pairs(user, job)
+    if allowed_pairs is not None:
+        allowed_pairs = {
+            (str(pn or "").strip().casefold(), str(rev or "").strip().casefold())
+            for pn, rev in allowed_pairs
+        }
+    return _authorised_requirement_keys(required_map, display_map, user, allowed_pairs)
+
+
 def _build_job_bom_rollup(
     job: Job,
     can_manage_orders: bool,
@@ -398,20 +443,11 @@ def _build_job_bom_rollup(
 ):
     required_map, display_map, occurrences = _job_required_structure(job, bom_lines)
     if user is not None:
-        allowed_required = allowed_pairs
-        if allowed_required is None:
-            allowed_required = authorised_part_pairs(
-                user,
-                [display_map.get(key, key) for key in required_map],
-            )
+        visible = _authorised_requirement_keys(
+            required_map, display_map, user, allowed_pairs
+        )
         required_map = {
-            key: value
-            for key, value in required_map.items()
-            if (
-                str(display_map.get(key, key)[0] or "").strip().casefold(),
-                str(display_map.get(key, key)[1] or "").strip().casefold(),
-            )
-            in allowed_required
+            key: value for key, value in required_map.items() if key in visible
         }
         occurrences = [
             occurrence
@@ -673,8 +709,14 @@ def jobs_view(job_id):
             j.customer = None
     users = _eligible_job_users() if user_has_permission(current_user, "jobs.assign") else []
     suppliers, customers = ([], []) if is_external else _job_form_destinations()
-    allowed_bom = relationship_job_part_pairs(current_user, j)
-    if allowed_bom is None:
+    # Two different sets, and they must not be confused. ``allowed_bom`` only
+    # ever authorises the job's own BOM lines. ``rollup_pairs`` authorises the
+    # exploded multi-level requirement, so it may only be pre-supplied when it
+    # already covers descendants - which the relationship scope does and the
+    # global-scope fallback does not. Passing the root-only set to the rollup
+    # collapsed Parts Not Yet Ordered to the job's roots.
+    relationship_pairs = relationship_job_part_pairs(current_user, j)
+    if relationship_pairs is None:
         allowed_bom = authorised_part_pairs(
             current_user,
             [
@@ -682,14 +724,16 @@ def jobs_view(job_id):
                 for line in (j.bom or [])
             ],
         )
+        rollup_pairs = None
     else:
         allowed_bom = {
             (
                 str(pn or "").strip().casefold(),
                 str(rev or "").strip().casefold(),
             )
-            for pn, rev in allowed_bom
+            for pn, rev in relationship_pairs
         }
+        rollup_pairs = allowed_bom
     orders = _orders_for_job(j)
     visible_bom = [
         line
@@ -732,7 +776,7 @@ def jobs_view(job_id):
         can_manage_orders=can_manage_orders,
         bom_lines=visible_bom,
         user=current_user,
-        allowed_pairs=allowed_bom,
+        allowed_pairs=rollup_pairs,
     )
     return render_template(
         "admin/jobs_form.html",
@@ -1157,7 +1201,7 @@ def job_bom_json(job_id):
         ordered = 0.0
         links = []
         for o in orders:
-            if (o.status or "") == "draft":
+            if (o.status or "") == "draft" or not supplies_job_requirement(o):
                 continue
             qty_in_o = 0.0
             for l in (o.lines or []):
