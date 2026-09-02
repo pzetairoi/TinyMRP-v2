@@ -7,6 +7,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ### Fixed
 
+- **The Visual Summary's root card now says what the child cards say.** The
+  part a pack is about gets a wider card on the first row, and that card was
+  drawn by its own block rather than by the routine that draws every other
+  card. The block never resolved the part's processes and never drew the
+  approval stamp, so the one part the pack is actually about was the only one
+  whose card showed neither its process colour rings nor whether it was
+  approved. Both are now drawn, scaled to the larger card, and a bought or
+  hardware root is left unstamped exactly as a bought child is. The wider card
+  is deliberate and unchanged.
+
 - **"Top level only" now means the same thing in every part of a Doc Pack, and
   is named for what it does.** The depth choice was honoured by the selected
   files, the Excel BOM rows and the binder body, but the visual summary and the

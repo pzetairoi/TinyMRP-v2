@@ -324,6 +324,12 @@ summary**, **cover page**, **where-used report**, **markup files** and a
 **markup report**. A **Fabrication Pack** preset ticks the usual fabrication
 set in one click.
 
+In the **visual summary** every part gets a card carrying its image, quantity,
+QR code, process colour rings and an approved / not-approved stamp. The part
+the pack is about gets a wider card on the first row, but it carries exactly
+the same information as the components below it. Bought and hardware parts are
+never stamped *not approved*, since nobody approves a catalogue screw.
+
 ### Binder options
 
 With the PDF binder selected you can add a cover page, index, visual list,

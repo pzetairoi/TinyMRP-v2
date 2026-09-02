@@ -1478,6 +1478,28 @@ def _visual_list_pdf(
             c.setStrokeColorRGB(0.1, 0.1, 0.1); c.setLineWidth(1.6)
             c.setFillColorRGB(1,1,1)
             c.rect(r_x, r_y, r_w, r_h, stroke=1, fill=1)
+            # The root card is bigger than a child card, but it says the same
+            # things about the same part: the process colour rings and the
+            # approval icon below are the child cell's, drawn to this box.
+            # Resolved once here because the rings need it before any text.
+            try:
+                pdoc = _part_by(pn, rev)
+            except Exception:
+                pdoc = None
+            r_procs_lower = [p.lower() for p in _part_processes(pdoc)]
+            # process colored rings inside the border
+            r_inset = 0.8*mm
+            for i, p in enumerate(r_procs_lower):
+                pcol = proc_colors.get(p)
+                if not pcol: continue
+                off = (i+1) * r_inset
+                c.setStrokeColorRGB(*pcol); c.setLineWidth(2)
+                c.rect(r_x+off, r_y+off, r_w-2*off, r_h-2*off, stroke=1, fill=0)
+            # Sized against the root's larger QR the same way a child cell sizes
+            # its icon against the 7mm one, so the two cards read as one family.
+            r_qr_size = 10*mm
+            r_icon_w = 11*mm
+            r_icon_h = 8.25*mm
             # image area on left, wider than normal
             ix_x = r_x + 3*mm
             ix_y = r_y + 8*mm
@@ -1494,7 +1516,6 @@ def _visual_list_pdf(
             hl_x = r_x + ix_w + 6*mm
             hl_y = r_y + r_h - 6*mm
             try:
-                pdoc = _part_by(pn, rev)
                 desc = _part_description(pdoc)
             except Exception:
                 desc = ''
@@ -1564,8 +1585,27 @@ def _visual_list_pdf(
                 qimg = qr.make_image(fill_color="black", back_color="white").convert("RGB")
                 from reportlab.lib.utils import ImageReader
                 qbuf = io.BytesIO(); qimg.save(qbuf, format='PNG'); qbuf.seek(0)
-                qr_size = 10*mm
-                c.drawImage(ImageReader(qbuf), r_x + r_w - qr_size - 4*mm, r_y + 4*mm, width=qr_size, height=qr_size, preserveAspectRatio=True, mask='auto')
+                c.drawImage(ImageReader(qbuf), r_x + r_w - r_qr_size - 4*mm, r_y + 4*mm, width=r_qr_size, height=r_qr_size, preserveAspectRatio=True, mask='auto')
+            except Exception:
+                pass
+
+            # Approval status icon (above the QR), on the same rule the child
+            # cells use: hardware, purchased and "others" parts are never
+            # stamped "not approved", because nobody approves a bought screw.
+            try:
+                # A root with no Part record is a synthetic label - the
+                # compile-sheet flow builds one from an uploaded parts list -
+                # so there is no approval state to report and nothing is drawn.
+                approved = part_is_released(pdoc) if pdoc is not None else False
+                show_notapproved = pdoc is not None
+                if r_procs_lower and any(p in ('hardware', 'purchase', 'others') for p in r_procs_lower):
+                    show_notapproved = False
+                icon_x = r_x + r_w - r_icon_w - 4*mm
+                icon_y = r_y + 4*mm + r_qr_size + 1*mm
+                if approved:
+                    _draw_svg_or_png(c, icon_x, icon_y, r_icon_w, r_icon_h, 'approved.svg', 'approved.png')
+                elif show_notapproved:
+                    _draw_svg_or_png(c, icon_x, icon_y, r_icon_w, r_icon_h, 'notapproved.svg', 'notapproved.png')
             except Exception:
                 pass
         except Exception:
