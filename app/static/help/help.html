@@ -454,7 +454,13 @@ longer need.</p>
 someone else needs — a supplier package, a job folder, a quotation set.</p>
 <h3 id="choosing-the-scope">Choosing the scope</h3>
 <ul>
-<li><strong>Depth</strong> — <em>top level only</em> or the <em>full BOM</em>.</li>
+<li><strong>Depth</strong> — <em>this part + its children</em>, or the <em>full BOM (all levels)</em>.
+<em>This part + its children</em> covers the assembly itself and the components
+directly under it, and stops there: a sub-assembly appears as a line item,
+but the parts inside that sub-assembly do not. It applies to everything the
+pack produces — the files, the Excel BOM, the binder, the visual summary and
+the hardware summary all cover exactly those two levels. <em>Full BOM</em> walks
+every level down to the last component.</li>
 <li><strong>Consumed components</strong> — show or hide parts consumed inside sub-assemblies.
 Shown by default.</li>
 <li><strong>Classified</strong> — hide, show, or show <em>only</em> classified parts.</li>
@@ -2366,7 +2372,8 @@ usual ones:</p>
 changing one is not.</p>
 </div></details><details class="help-section" id="sec-a-doc-pack-is-missing-sections"><summary><span class="help-section-title" id="a-doc-pack-is-missing-sections">A Doc Pack is missing sections</span></summary><div class="help-section-body">
 <ol>
-<li><strong>Depth</strong> — <em>top level only</em> excludes children.</li>
+<li><strong>Depth</strong> — <em>this part + its children</em> stops one level below the root, so
+anything deeper than the immediate components is left out on purpose.</li>
 <li><strong>Consumed / classified / process filters</strong> may be excluding the parts you
 expect.</li>
 <li><strong>The source files must exist.</strong> A binder cannot include a PDF that was

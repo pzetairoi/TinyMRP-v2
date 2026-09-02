@@ -7,6 +7,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ### Fixed
 
+- **"Top level only" now means the same thing in every part of a Doc Pack, and
+  is named for what it does.** The depth choice was honoured by the selected
+  files, the Excel BOM rows and the binder body, but the visual summary and the
+  hardware summary walked the entire tree regardless - so a pack meant to cover
+  one assembly and its components still listed grandchildren and everything
+  below them, in the standalone PDFs and in the binder sections alike. The
+  Excel `Level` and `Total Qty` columns had the same gap: a part used both
+  directly and inside a sub-assembly reported the deeper position and a
+  quantity that counted uses the pack excluded. Every output now stops at the
+  chosen depth. The option is called **This part + its children** (against
+  **Full BOM (all levels)**) on the part page, the job form and the order form,
+  and the help - which previously said it "excludes children", the opposite of
+  what it has ever done - describes the real scope.
+
 - **Job ordering can reach the whole BOM again.** The read-only job detail page
   authorised the exploded multi-level requirement against a set that only ever
   held the job's own BOM lines, so every descendant was discarded: purchasing

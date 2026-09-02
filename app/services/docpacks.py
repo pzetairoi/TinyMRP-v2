@@ -692,12 +692,15 @@ def _bom_occurrences(
     root_pn: str,
     root_rev: Optional[str],
     *,
+    full: bool = True,
     include_consumed: bool = True,
     terminal_processes: Optional[Iterable[str]] = None,
 ) -> Dict[Tuple[str,str], List[Tuple[str, float]]]:
     """Return mapping (pn,rev) -> list of (level_path, qty_at_that_level).
     Level path follows legacy-style "+.01.02" when sequence metadata exists.
     Applies the same consumed/terminal filtering as the visual list/BOM flatten.
+    If full=False, only the immediate children of the root are walked, so the
+    level paths a first-level-only pack reports never mention deeper rows.
     """
     if root_rev is None:
         root_part = _part_by(root_pn, None)
@@ -774,6 +777,8 @@ def _bom_occurrences(
         pn, rev, level_path, q = stack.pop()
         key = (pn, _clean_rev(rev))
         occ.setdefault(key, []).append((level_path, q))
+        if not full:
+            continue
         if not include_consumed:
             pdoc = _part_by(pn, rev)
             procs = set(_part_processes(pdoc))
@@ -2893,14 +2898,17 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
 
     # Excel BOM
     if opts.want_excel_bom:
-        occ_map = {} if opts.flat_override is not None else _bom_occurrences(opts.root_pn, opts.root_rev, include_consumed=bool(opts.include_consumed), terminal_processes=["welding","purchase","machine"])
+        occ_map = {} if opts.flat_override is not None else _bom_occurrences(opts.root_pn, opts.root_rev, full=(opts.depth != "top"), include_consumed=bool(opts.include_consumed), terminal_processes=["welding","purchase","machine"])
         root_key = (opts.root_pn, _norm_rev(root_rev_resolved))
         if root_key not in occ_map and opts.flat_override is None:
             occ_map[root_key] = [("+", 1.0)]
+        # Total quantity is aggregated over whatever the pack covers. On a
+        # first-level-only pack that is the immediate children, so the column
+        # cannot report a total that counts occurrences the pack never shows.
         full_flat = _flat_or_override(
             opts.root_pn,
             opts.root_rev,
-            full=True,
+            full=(opts.depth != "top"),
             include_consumed=bool(opts.include_consumed),
             terminal_processes=["welding","purchase","machine"],
         )
@@ -2953,10 +2961,15 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         if fab_all is not None:
             vis_source = fab_all
         else:
+            # Must honour the depth choice like every other output does. This
+            # walked the whole tree unconditionally, so a "this part + its
+            # children" pack still listed grandchildren in the visual and
+            # hardware summaries while its files, BOM and binder body stopped
+            # at the first level.
             vis_source = _flat_or_override(
                 opts.root_pn,
                 opts.root_rev,
-                full=True,
+                full=(opts.depth != "top"),
                 include_consumed=bool(opts.include_consumed),
                 terminal_processes=["welding", "purchase", "machine"],
             )
@@ -3358,11 +3371,13 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                     val = pre_body_offset + int(sp)
                     if key not in first_page or val < first_page[key]:
                         first_page[key] = val
-                # Rebuild visual list with page numbers (ensure full-BOM aggregated quantities)
+                # Rebuild visual list with page numbers, over the same scope the
+                # first pass used - aggregated across the full BOM, or stopping
+                # at the immediate children when that is the chosen depth.
                 vis_full2 = _flat_or_override(
                     opts.root_pn,
                     opts.root_rev,
-                    full=True,
+                    full=(opts.depth != "top"),
                     include_consumed=bool(opts.include_consumed),
                     terminal_processes=["welding","purchase","machine"],
                 )

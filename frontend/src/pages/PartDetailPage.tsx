@@ -3111,11 +3111,16 @@ function isExternalDatasheetUrl(url: string): boolean {
                     <div className="fw-semibold small">Depth of compilation</div>
                     <div className="form-check">
                       <input className="form-check-input" type="radio" name="depth" id="depthTop" checked={depth==='top'} onChange={()=>setDepth('top')} />
-                      <label className="form-check-label" htmlFor="depthTop">Top Level only</label>
+                      <label className="form-check-label" htmlFor="depthTop">This part + its children</label>
                     </div>
                     <div className="form-check">
                       <input className="form-check-input" type="radio" name="depth" id="depthFull" checked={depth==='full'} onChange={()=>setDepth('full')} />
-                      <label className="form-check-label" htmlFor="depthFull">Full BOM</label>
+                      <label className="form-check-label" htmlFor="depthFull">Full BOM (all levels)</label>
+                    </div>
+                    <div className="form-text small">
+                      {depth === 'top'
+                        ? 'The assembly itself plus the components directly under it. Sub-assemblies appear as line items; what is inside them does not.'
+                        : 'Every level of the tree, down to the last component.'}
                     </div>
                   </div>
 

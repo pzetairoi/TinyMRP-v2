@@ -88,7 +88,8 @@ changing one is not.
 
 ## A Doc Pack is missing sections
 
-1. **Depth** — *top level only* excludes children.
+1. **Depth** — *this part + its children* stops one level below the root, so
+   anything deeper than the immediate components is left out on purpose.
 2. **Consumed / classified / process filters** may be excluding the parts you
    expect.
 3. **The source files must exist.** A binder cannot include a PDF that was

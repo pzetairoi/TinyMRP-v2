@@ -303,7 +303,13 @@ someone else needs — a supplier package, a job folder, a quotation set.
 
 ### Choosing the scope
 
-- **Depth** — *top level only* or the *full BOM*.
+- **Depth** — *this part + its children*, or the *full BOM (all levels)*.
+  *This part + its children* covers the assembly itself and the components
+  directly under it, and stops there: a sub-assembly appears as a line item,
+  but the parts inside that sub-assembly do not. It applies to everything the
+  pack produces — the files, the Excel BOM, the binder, the visual summary and
+  the hardware summary all cover exactly those two levels. *Full BOM* walks
+  every level down to the last component.
 - **Consumed components** — show or hide parts consumed inside sub-assemblies.
   Shown by default.
 - **Classified** — hide, show, or show *only* classified parts.
