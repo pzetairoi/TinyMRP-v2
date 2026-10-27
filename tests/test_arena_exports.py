@@ -66,7 +66,7 @@ def test_arena_bom_export_outputs_tree_rows_and_selected_fields(client):
     assert len(rows) == 3
 
     assert resp.headers["Content-Disposition"].endswith('ASM-ARENA_A_arena_bom.csv"') or "ASM-ARENA_A_arena_bom.csv" in resp.headers["Content-Disposition"]
-    assert list(rows[0].keys()) == ["item number", "line number", "level", "quantity", "item name", "description", "Revision", "material", "item category"]
+    assert list(rows[0].keys()) == ["item number", "line number", "level", "quantity", "item name", "description", "Revision", "material", "item category", "procurement type"]
 
     assert rows[0]["item number"] == "ASM-ARENA"
     assert rows[0]["line number"] == "3"
@@ -91,6 +91,33 @@ def test_arena_bom_export_outputs_tree_rows_and_selected_fields(client):
     assert rows[2]["quantity"] == "3"
     assert rows[2]["item name"] == "Arena Grandchild"
     assert rows[2]["description"] == rows[2]["item name"]
+
+
+def test_arena_bom_export_marks_hardware_and_purchased_parts_as_ots(client):
+    admin = _admin_user()
+    _login(client, admin)
+
+    root = Part(part_number="ASM-PROC", revision="A", description="Root", processes=["assembly"]).save()
+    made = Part(part_number="CMP-MADE", revision="A", description="Made", processes=["lasercut", "folding"]).save()
+    hardware = Part(part_number="CMP-HW", revision="A", description="Bolt", processes=["hardware"]).save()
+    bought = Part(part_number="CMP-BUY", revision="A", description="Motor", processes=["machine", "purchase"]).save()
+    bare = Part(part_number="CMP-BARE", revision="A", description="No process").save()
+
+    for child in (made, hardware, bought, bare):
+        BOMLink(parent_pn=root.part_number, parent_rev=root.revision, child_pn=child.part_number, child_rev=child.revision, qty=1).save()
+
+    resp = client.post(f"/api/parts/{root.part_number}/export/arena_bom", json={"rev": root.revision})
+    assert resp.status_code == 200
+
+    rows = _read_csv_response(resp)
+    assert list(rows[0].keys())[-1] == "procurement type"
+    assert {row["item number"]: row["procurement type"] for row in rows} == {
+        "ASM-PROC": "MTS",
+        "CMP-MADE": "MTS",
+        "CMP-HW": "OTS",
+        "CMP-BUY": "OTS",
+        "CMP-BARE": "MTS",
+    }
 
 
 def test_arena_bom_export_uses_aggregate_link_qty_not_source_occurrences(client):
@@ -220,6 +247,7 @@ def test_arena_bom_export_uses_admin_defaults_and_alias_headers(client):
         "Arena Revision",
         "Arena Material",
         "Legacy Arena Code",
+        "procurement type",
     ]
 
     assert rows[0]["item number"] == "ASM-ALIAS"

@@ -22,9 +22,12 @@ from app.services.part_norm import clean_rev
 
 import re
 from flask import current_app, has_app_context
-from app.services.insights import HARDWARE_TERMS, normalized_processes as normalized_process_list
+from app.services.insights import HARDWARE_TERMS, PURCHASE_TERMS, normalized_processes as normalized_process_list
 
 
+_ARENA_PROCUREMENT_HEADER = "procurement type"
+# Hardware and bought-in parts are off-the-shelf; everything else is made.
+_OTS_PROCESS_TERMS = HARDWARE_TERMS | PURCHASE_TERMS | {"purchased"}
 _ARENA_BOM_RESERVED_FIELD_IDS = {"thumbnail", "part_number", "description", "qty", "level"}
 _ARENA_LINK_SUPPORTED_GROUPS = {"pdf", "dxf", "step"}
 _ARENA_LINK_PRIORITY = {
@@ -173,7 +176,7 @@ def build_arena_bom_csv(
 
     extra_headers: list[str] = []
     header_by_field_id: dict[str, str] = {}
-    used_headers = {"item number", "line number", "level", "quantity", "item name", "description"}
+    used_headers = {"item number", "line number", "level", "quantity", "item name", "description", _ARENA_PROCUREMENT_HEADER}
     for field_id in selected_field_ids:
         field = fields_by_id.get(field_id)
         if not field:
@@ -186,7 +189,7 @@ def build_arena_bom_csv(
         extra_headers.append(header)
         header_by_field_id[field_id] = header
 
-    headers = ["item number", "line number", "level", "quantity", "item name", "description", *extra_headers]
+    headers = ["item number", "line number", "level", "quantity", "item name", "description", *extra_headers, _ARENA_PROCUREMENT_HEADER]
     rows: list[dict[str, Any]] = []
 
     def values_for(
@@ -241,6 +244,7 @@ def build_arena_bom_csv(
             "item name": root_description,
             "description": root_description,
             **root_values,
+            _ARENA_PROCUREMENT_HEADER: _procurement_type(root_part),
         }
     )
 
@@ -254,7 +258,7 @@ def build_arena_bom_csv(
     # Part fetch, its harvested attrs and its description. Re-running those
     # for every occurrence was pure waste, not correctness.
     _children_cache: Dict[Tuple[str, str], list] = {}
-    _part_lookup_cache: Dict[Tuple[str, str], Tuple[Optional[Part], str, str]] = {}
+    _part_lookup_cache: Dict[Tuple[str, str], Tuple[Optional[Part], str, str, str]] = {}
 
     def children(pn: str, rev: str) -> list:
         key = (pn, rev)
@@ -264,7 +268,7 @@ def build_arena_bom_csv(
             _children_cache[key] = cached
         return cached
 
-    def part_lookup(pn: str, rev: str) -> Tuple[Optional[Part], str, str]:
+    def part_lookup(pn: str, rev: str) -> Tuple[Optional[Part], str, str, str]:
         key = (pn, rev)
         cached = _part_lookup_cache.get(key)
         if cached is not None:
@@ -275,7 +279,7 @@ def build_arena_bom_csv(
         description = _csv_text(
             _resolve_values(part, ["description"], extra={"part_number": pn, "revision": effective_rev}).get("description")
         )
-        result = (part, effective_rev, description)
+        result = (part, effective_rev, description, _procurement_type(part))
         _part_lookup_cache[key] = result
         return result
 
@@ -290,7 +294,7 @@ def build_arena_bom_csv(
                 continue
             if is_allowed and not is_allowed(child_pn, child_rev):
                 raise RuntimeError("Export scope is incomplete.")
-            child_part, effective_rev, description = part_lookup(child_pn, child_rev)
+            child_part, effective_rev, description, procurement_type = part_lookup(child_pn, child_rev)
             next_ancestry = ancestry + (child_key,)
             # BOMLink.qty is the authoritative quantity for this parent/child
             # relationship. ``occurrences`` only preserves the individual
@@ -318,6 +322,7 @@ def build_arena_bom_csv(
                     total_qty=total_qty,
                 )
             )
+            row[_ARENA_PROCUREMENT_HEADER] = procurement_type
             rows.append(row)
             walk(child_pn, effective_rev, depth + 1, next_ancestry, total_qty)
 
@@ -476,10 +481,7 @@ def _raw_process_terms(part: Optional[Part], attrs: dict[str, Any]) -> set[str]:
     return terms
 
 
-def _is_hardware_or_fastener(part: Optional[Part]) -> bool:
-    if not part:
-        return False
-
+def _process_terms(part: Part) -> set[str]:
     attrs = harvest_part_attrs(part)
     meta = current_app.config.get("PROCESS_META", {}) if has_app_context() else {}
 
@@ -491,6 +493,16 @@ def _is_hardware_or_fastener(part: Optional[Part]) -> bool:
         )
         or []
     )
-    raw_terms = _raw_process_terms(part, attrs)
+    return normalized | _raw_process_terms(part, attrs)
 
-    return bool((normalized | raw_terms) & HARDWARE_TERMS)
+
+def _is_hardware_or_fastener(part: Optional[Part]) -> bool:
+    if not part:
+        return False
+    return bool(_process_terms(part) & HARDWARE_TERMS)
+
+
+def _procurement_type(part: Optional[Part]) -> str:
+    if part and _process_terms(part) & _OTS_PROCESS_TERMS:
+        return "OTS"
+    return "MTS"
