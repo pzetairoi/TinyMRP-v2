@@ -1075,6 +1075,23 @@ export default function UploadPackPage() {
             </button>
           </div>
 
+          {plan.summary.blocked ? (
+            // A blocked change is otherwise easy to miss: the import still
+            // succeeds, so say what was left out and how to include it.
+            <div className="alert alert-warning small mt-3" role="status">
+              <strong>
+                {plan.summary.blocked} part/revision{plan.summary.blocked === 1 ? "" : "s"}{" "}
+                {applied
+                  ? "had changes that were not applied"
+                  : `${plan.summary.blocked === 1 ? "has" : "have"} changes that will not be applied`}
+              </strong>{" "}
+              because the selected policy protects them — usually approved parts. To include them, choose{" "}
+              <strong>Overwrite with the pack</strong> and tick{" "}
+              <strong>Also overwrite approved part/revisions</strong>, then preview again. The Blocked
+              group below lists each change.
+            </div>
+          ) : null}
+
           {rootPn ? (
             // Always show what is being imported; only link once it exists.
             <RootPartCard

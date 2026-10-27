@@ -205,4 +205,42 @@ describe('UploadPackPage redline', () => {
     expect(screen.getByText(/2 part\(s\) created/)).toBeInTheDocument()
     expect(screen.getByText(/4 file\(s\) written/)).toBeInTheDocument()
   })
+
+  // Issue #132: a re-import that skipped an approved part's new process still
+  // reported success, so the operator never learned the change was left out.
+  it('says how many parts the policy blocked and how to include them', async () => {
+    await previewWith({
+      dry_run: true,
+      zip: 'pack.zip',
+      plan: plan([part(), part({ part_number: 'IMPTEST-P02', blocked: true, changed: false })]),
+    })
+
+    const notice = await screen.findByText(/1 part\/revision has changes that will not be applied/)
+    expect(notice.closest('[role="status"]')?.textContent).toMatch(/Also overwrite approved part\/revisions/)
+  })
+
+  it('tells an applied import which changes it left out', async () => {
+    await previewWith({
+      dry_run: false,
+      zip: 'pack.zip',
+      plan: {
+        ...plan([part({ blocked: true }), part({ part_number: 'IMPTEST-P02', blocked: true })]),
+        summary: { parts: 2, new: 0, changed: 2, blocked: 2, modified_approved: 0 },
+      },
+      metrics: { parts_updated: 0, operation_id: 'abcdef1234' },
+    })
+
+    expect(await screen.findByText(/2 part\/revisions had changes that were not applied/)).toBeInTheDocument()
+  })
+
+  it('shows no blocked notice when nothing was blocked', async () => {
+    await previewWith({
+      dry_run: true,
+      zip: 'pack.zip',
+      plan: { ...plan([part()]), summary: { parts: 1, new: 0, changed: 1, blocked: 0, modified_approved: 0 } },
+    })
+
+    expect(await screen.findByText('PREVIEW')).toBeInTheDocument()
+    expect(screen.queryByText(/will not be applied/)).not.toBeInTheDocument()
+  })
 })

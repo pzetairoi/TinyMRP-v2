@@ -45,6 +45,7 @@ from app.services.import_zip import (
 )
 from app.services.part_materialized import sync_part_materialized_fields
 from app.services.part_norm import clean_pn, clean_rev
+from app.services.processmeta import normalize_processes
 from app.services.bom_packs import sweep_bom_packs_if_due
 from app.services.thumbs_gen import generate_thumbs_for_parts
 from app.services.timezone_utils import utc_iso, utc_now
@@ -975,6 +976,23 @@ def _existing_logical(
         if aliases.get(canonical_attr_key(raw_key), canonical_attr_key(raw_key)) == field_id:
             return value
     return (part.canonical or {}).get(field_id)
+def _process_redline(part: Part | None, incoming: dict[str, Any]) -> tuple[Any, Any]:
+    """Before/after for the multi-value process field, as the stored lists.
+
+    Every process alias in the pack (``process2``, ``comments``...) feeds the
+    one field, so comparing the first alias's raw text alone called a pack
+    whose process sits in a later alias "unchanged" and dropped it. Compare
+    the normalised lists the apply will store instead. A pack whose process
+    columns are all blank leaves the stored list alone, exactly as the
+    canonical sync falls back to it.
+    """
+    meta = current_app.config.get("PROCESS_META", {}) if has_app_context() else {}
+    values = [value for value in (incoming.get("raw_values") or {}).values() if _has_value(value)]
+    after = ", ".join(normalize_processes({"processes": values}, meta or {}))
+    if part is None:
+        return None, after
+    before = ", ".join(str(value) for value in (part.processes or []) if value)
+    return before, (after or before)
 def _property_action(
     mode: str,
     state: str,
@@ -1238,12 +1256,16 @@ def build_import_plan(
         properties = []
         incoming_fields = _logical_incoming(normalized, aliases, fields)
         for field_id, incoming in sorted(incoming_fields.items()):
-            before = _existing_logical(existing_part, incoming, aliases)
+            if field_id == "process":
+                before, after = _process_redline(existing_part, incoming)
+            else:
+                before = _existing_logical(existing_part, incoming, aliases)
+                after = incoming["value"]
             action, reason = _property_action(
                 options["data_mode"],
                 state,
                 before,
-                incoming["value"],
+                after,
             )
             conflicts = incoming.get("conflicts") or {}
             if conflicts:
@@ -1263,7 +1285,7 @@ def build_import_plan(
                     "raw_values": incoming.get("raw_values", {}),
                     "alias_conflicts": _json_value(conflicts),
                     "before": _json_value(before),
-                    "after": _json_value(incoming["value"]),
+                    "after": _json_value(after),
                     "action": action,
                     "reason": reason,
                 }

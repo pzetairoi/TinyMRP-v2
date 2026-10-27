@@ -334,3 +334,104 @@ def test_import_bom_can_map_comments_to_canonical_process_with_admin_aliases(app
         assert part.attrs.get("secondprocess") == "MACHINE"
         assert (part.canonical or {}).get("processes") == ["lasercut", "machine"]
         assert (part.processes or []) == ["lasercut", "machine"]
+
+
+def _process_alias_config():
+    save_field_config(
+        {
+            "canonical_aliases": [
+                {
+                    "field_id": "process",
+                    "aliases": ["process", "processes", "comments", "secondprocess", "thirdprocess"],
+                }
+            ]
+        }
+    )
+
+
+def _process_pack(pn: str, comments: str, **extra) -> bytes:
+    row = {
+        "partnumber": pn,
+        "revision": "",
+        "description": "Process alias part",
+        "process": "",
+        "process2": "",
+        "process3": "",
+        "comments": comments,
+        "secondprocess": "",
+        "thirdprocess": "",
+        **extra,
+    }
+    tree_txt = "\n".join(["ITEM NO.\tPART NUMBER\tRevision\tQTY.", f"1\t{pn}\t\t1"])
+    return _make_zip(repr(row), tree_txt)
+
+
+def _run(zip_bytes: bytes, *, dry_run: bool = False, **modes) -> dict:
+    return import_upload_pack(
+        zip_bytes,
+        "process.zip",
+        dry_run=dry_run,
+        allow_extra=False,
+        seed_tag="test",
+        generate_thumbs=False,
+        **modes,
+    )
+
+
+def _process_row(result: dict, pn: str) -> dict:
+    part = next(item for item in result["plan"]["parts"] if item["part_number"] == pn)
+    return next(item for item in part["properties"] if item["field_id"] == "process")
+
+
+def test_reimport_fills_process_carried_by_a_later_alias(app):
+    # Issue #132: the part existed before its process was set in SolidWorks.
+    # The process arrives in "comments" while "process" stays blank, and the
+    # redline used to compare only the blank first alias and call it unchanged.
+    with app.app_context():
+        _process_alias_config()
+        _run(_process_pack("PROC-200", ""), data_mode="fill_blanks")
+        assert Part.objects(part_number="PROC-200").first().processes == []
+
+        pack = _process_pack("PROC-200", "CUTTING")
+        row = _process_row(_run(pack, dry_run=True, data_mode="fill_blanks"), "PROC-200")
+        assert (row["before"], row["after"], row["action"]) == ("", "cutting", "add")
+
+        _run(pack, data_mode="fill_blanks")
+        part = Part.objects(part_number="PROC-200").first()
+        assert part.processes == ["cutting"]
+        assert part.attrs.get("comments") == "CUTTING"
+
+
+def test_reimport_reports_process_on_approved_part_as_blocked_until_overridden(app):
+    approval = {"approvedby": "QA", "approveddate": "2026-10-20"}
+    with app.app_context():
+        _process_alias_config()
+        _run(
+            _process_pack("PROC-210", "", **approval),
+            data_mode="replace_unapproved",
+            approval_mode="import_unapproved",
+        )
+        assert (Part.objects(part_number="PROC-210").first().canonical or {}).get("approved") is True
+
+        pack = _process_pack("PROC-210", "PROFILE CUT", **approval)
+        for mode in ("fill_blanks", "replace_unapproved"):
+            result = _run(pack, dry_run=True, data_mode=mode, approval_mode="import_unapproved")
+            assert _process_row(result, "PROC-210")["action"] == "blocked"
+            assert result["plan"]["summary"]["blocked"] == 1
+
+        _run(pack, data_mode="replace_all", bom_mode="replace_all", file_mode="replace_all", approval_mode="replace_all")
+        assert Part.objects(part_number="PROC-210").first().processes == ["profile cut"]
+
+
+def test_reimport_with_blank_process_columns_keeps_stored_processes(app):
+    with app.app_context():
+        _process_alias_config()
+        _run(_process_pack("PROC-220", "LASERCUT"), data_mode="fill_blanks")
+        assert Part.objects(part_number="PROC-220").first().processes == ["lasercut"]
+
+        pack = _process_pack("PROC-220", "")
+        row = _process_row(_run(pack, dry_run=True, data_mode="replace_unapproved"), "PROC-220")
+        assert (row["before"], row["after"], row["action"]) == ("lasercut", "lasercut", "unchanged")
+
+        _run(pack, data_mode="replace_unapproved")
+        assert Part.objects(part_number="PROC-220").first().processes == ["lasercut"]

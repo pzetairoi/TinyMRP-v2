@@ -7,6 +7,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ### Fixed
 
+- **Re-importing a pack now picks up a process added after the part existed.**
+  Process is the one property several columns feed (`process2`, or `comments`
+  where an admin aliases it), but the import redline compared only the first
+  of them. A part first imported without a process, whose process was later
+  filled in a later alias, therefore showed the change as "unchanged" and
+  silently kept no process - under every policy, overwrite included - so the
+  Excel BOM and doc packs showed it blank. Only deleting the part and importing
+  again worked. The redline now compares the full process list the import
+  stores, so the change is added on a draft and reported as blocked on an
+  approved part. A pack whose process columns are all blank still leaves the
+  stored processes alone. (#132)
+
+- **An import now says plainly which changes its policy left out.** When the
+  plan blocks changes - usually on approved parts - the preview and the
+  applied result show how many part/revisions are affected and how to include
+  them (Overwrite with the pack, plus Also overwrite approved part/revisions),
+  instead of leaving it to a count in the summary line.
+
 - **The Visual Summary's root card now says what the child cards say.** The
   part a pack is about gets a wider card on the first row, and that card was
   drawn by its own block rather than by the routine that draws every other
