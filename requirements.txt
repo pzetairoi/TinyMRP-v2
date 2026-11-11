@@ -33,7 +33,7 @@ libpass==1.9.3
 argon2-cffi==25.1.0
 argon2-cffi-bindings==25.1.0
 cffi==2.0.0
-pycparser==2.22
+pycparser==3.0
 
 # --- Database ---
 mongoengine==0.29.3
