@@ -39,6 +39,7 @@ from app.services.filescan import discover_part_files, upsert_part_files_detaile
 from app.services.import_zip import (
     _aggregate_links,
     _base_pn,
+    _is_hardware_by_folder,
     _normalize_part,
     _parse_flatbom,
     _parse_treebom,
@@ -993,6 +994,43 @@ def _process_redline(part: Part | None, incoming: dict[str, Any]) -> tuple[Any, 
         return None, after
     before = ", ".join(str(value) for value in (part.processes or []) if value)
     return before, (after or before)
+def _hardware_process_redline(
+    part: Part | None,
+    incoming: dict[str, Any],
+    aliases: dict[str, str],
+) -> tuple[Any, Any, dict[str, Any]]:
+    """Before/after and the columns to write for a part in a hardware folder.
+
+    Such a part is hardware whatever process the pack carries: the canonical
+    sync already forces it, but the pack's text (often a Toolbox "Purchase")
+    used to be written over the stored one and the preview reported a change
+    to purchase. Compare what the stored process columns read instead, and
+    when they do not read hardware, write ``hardware`` in place of every
+    process column the pack or the part holds. Preserved columns such as
+    ``comments`` keep the pack's text, even where an admin aliases them.
+    """
+    meta = current_app.config.get("PROCESS_META", {}) if has_app_context() else {}
+    raw_values = incoming.get("raw_values") or {}
+
+    def columns(attrs: dict[str, Any]) -> dict[str, Any]:
+        return {
+            str(key): value
+            for key, value in (attrs or {}).items()
+            if aliases.get(canonical_attr_key(key), canonical_attr_key(key)) == "process"
+            and canonical_attr_key(key) not in _PRESERVED_ATTR_KEYS
+        }
+
+    stored = columns(part.attrs or {}) if part is not None else {}
+    writes = {
+        key: value for key, value in raw_values.items() if canonical_attr_key(key) in _PRESERVED_ATTR_KEYS
+    }
+    writes.update({key: "" for key in {**columns(raw_values), **stored}})
+    writes[incoming["write_key"]] = "hardware"
+    if part is None:
+        return None, "hardware", writes
+    readable = [value for value in stored.values() if _has_value(value)]
+    before = ", ".join(normalize_processes({"processes": readable}, meta or {}))
+    return before or ", ".join(str(value) for value in (part.processes or []) if value), "hardware", writes
 def _property_action(
     mode: str,
     state: str,
@@ -1255,8 +1293,15 @@ def build_import_plan(
         )
         properties = []
         incoming_fields = _logical_incoming(normalized, aliases, fields)
+        # Judged on the attrs the part will hold, as the canonical sync is.
+        in_hardware_folder = _is_hardware_by_folder(
+            {**((existing_part.attrs or {}) if existing_part else {}), **(normalized.get("attrs") or {})}
+        )
         for field_id, incoming in sorted(incoming_fields.items()):
-            if field_id == "process":
+            if field_id == "process" and in_hardware_folder:
+                before, after, writes = _hardware_process_redline(existing_part, incoming, aliases)
+                incoming = {**incoming, "raw_values": writes}
+            elif field_id == "process":
                 before, after = _process_redline(existing_part, incoming)
             else:
                 before = _existing_logical(existing_part, incoming, aliases)

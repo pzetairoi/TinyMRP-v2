@@ -92,7 +92,8 @@ def test_import_bom_flags_hardware_from_folder(app):
 
         assert "hardware" in (bolt.processes or [])
         assert "hardware" in (rivet.processes or [])
-        assert bolt.attrs.get("process") == "purchase"
+        # A part in a hardware folder stores hardware, not the pack's text.
+        assert bolt.attrs.get("process") == "hardware"
         assert rivet.attrs.get("process") == "fasteners"
         assert (bolt.canonical or {}).get("processes") == ["hardware"]
         assert (rivet.canonical or {}).get("processes") == ["hardware"]
@@ -435,3 +436,87 @@ def test_reimport_with_blank_process_columns_keeps_stored_processes(app):
 
         _run(pack, data_mode="replace_unapproved")
         assert Part.objects(part_number="PROC-220").first().processes == ["lasercut"]
+
+
+def _fastener_pack(pn: str, folder: str, **row) -> bytes:
+    flat = {
+        "partnumber": pn,
+        "revision": "",
+        "description": "Hex bolt",
+        "process": "Purchase",
+        "process2": "",
+        "process3": "",
+        "folder": folder,
+        "path": f"{folder}/{pn}.sldprt",
+        **row,
+    }
+    tree_txt = "\n".join(["ITEM NO.\tPART NUMBER\tRevision\tQTY.", f"1\t{pn}\t\t4"])
+    return _make_zip(repr(flat), tree_txt)
+
+
+@pytest.mark.parametrize("mode", ["fill_blanks", "replace_unapproved", "replace_all"])
+def test_reimport_keeps_hardware_on_a_part_in_a_hardware_folder(app, mode):
+    # A Toolbox fastener carrying "Purchase" used to have that text written over
+    # its stored "Hardware" on every overwrite, and the preview reported a
+    # change to purchase, although the canonical process stayed hardware.
+    with app.app_context():
+        Part(part_number="HW-BOLT", revision="", description="Hex bolt",
+             attrs={"process": "Hardware"}).save()
+        pack = _fastener_pack("HW-BOLT", "D:/Library/Fasteners/ISO")
+
+        row = _process_row(_run(pack, dry_run=True, data_mode=mode), "HW-BOLT")
+        assert (row["before"], row["after"], row["action"]) == ("hardware", "hardware", "unchanged")
+
+        _run(pack, data_mode=mode)
+        part = Part.objects(part_number="HW-BOLT").first()
+        assert part.processes == ["hardware"]
+        assert part.attrs.get("process") == "Hardware"
+
+
+def test_reimport_restores_hardware_text_overwritten_by_an_earlier_import(app):
+    with app.app_context():
+        Part(part_number="HW-NUT", revision="", description="Hex nut",
+             attrs={"process": "Purchase", "process2": "zinc", "folder": "D:/Library/Hardware/Nuts"}).save()
+        pack = _fastener_pack("HW-NUT", "D:/Library/Hardware/Nuts")
+
+        row = _process_row(_run(pack, dry_run=True, data_mode="replace_unapproved"), "HW-NUT")
+        assert (row["before"], row["after"], row["action"]) == ("purchase, zinc", "hardware", "replace")
+
+        _run(pack, data_mode="replace_unapproved")
+        part = Part.objects(part_number="HW-NUT").first()
+        assert part.processes == ["hardware"]
+        assert part.attrs.get("process") == "hardware"
+        assert part.attrs.get("process2") == ""
+
+
+def test_new_part_in_a_hardware_folder_stores_hardware(app):
+    with app.app_context():
+        pack = _fastener_pack("HW-WASHER", "C:/SOLIDWORKS Data/Toolbox/ISO/washers")
+        row = _process_row(_run(pack, dry_run=True, data_mode="fill_blanks"), "HW-WASHER")
+        assert (row["after"], row["action"]) == ("hardware", "add")
+
+        _run(pack, data_mode="fill_blanks")
+        part = Part.objects(part_number="HW-WASHER").first()
+        assert part.processes == ["hardware"]
+        assert part.attrs.get("process") == "hardware"
+
+
+def test_hardware_folder_rule_leaves_an_aliased_comments_column_alone(app):
+    with app.app_context():
+        _process_alias_config()
+        pack = _fastener_pack("HW-RIVET", "D:/Library/Fasteners", comments="Purchase - see supplier")
+        _run(pack, data_mode="replace_all")
+        part = Part.objects(part_number="HW-RIVET").first()
+        assert part.processes == ["hardware"]
+        assert part.attrs.get("process") == "hardware"
+        assert part.attrs.get("comments") == "Purchase - see supplier"
+
+
+def test_part_outside_a_hardware_folder_still_takes_the_pack_process(app):
+    with app.app_context():
+        Part(part_number="JOB-BOLT", revision="", description="Hex bolt",
+             attrs={"process": "hardware"}).save()
+        _run(_fastener_pack("JOB-BOLT", "D:/Jobs/1234/parts"), data_mode="replace_unapproved")
+        part = Part.objects(part_number="JOB-BOLT").first()
+        assert part.processes == ["purchase"]
+        assert part.attrs.get("process") == "Purchase"

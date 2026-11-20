@@ -7,6 +7,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ### Fixed
 
+- **A fastener in a hardware folder now stays hardware on every import.** A
+  part whose folder or path names a hardware folder (Admin -> hardware folders;
+  by default toolbox, fastener(s) and hardware) was already classed as
+  hardware, but an overwrite still wrote the pack's own process text - often a
+  Toolbox "Purchase" - over the stored "Hardware", and the preview reported a
+  change to purchase. The import now plans such a part as hardware whatever
+  the pack carries: a part already reading hardware is left unchanged, a new
+  one is stored as hardware, and one an earlier import rewrote is put back to
+  hardware under an overwrite. A comments column aliased to process keeps its
+  text. Parts outside those folders take the pack's process as before.
+
 - **Re-importing a pack now picks up a process added after the part existed.**
   Process is the one property several columns feed (`process2`, or `comments`
   where an admin aliases it), but the import redline compared only the first
