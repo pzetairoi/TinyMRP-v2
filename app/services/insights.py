@@ -43,13 +43,36 @@ def normalized_processes(attrs: Dict, part_processes: List[str], meta: Dict) -> 
     return normalize_processes(attrs or {}, meta)
 
 
+def is_hardware(attrs: Dict, part_processes: List[str], meta: Dict) -> bool:
+    """The one rule for hardware, asked by every list that sets hardware apart.
+
+    A part is hardware when a process names it hardware or fasteners, or when
+    its file sits in a hardware folder. Category plays no part: it is free text
+    from the CAD file, and a fastener whose category read "Fastener" used to be
+    kept out of the hardware summary and drawn on the visual summary instead.
+
+    The raw process columns are read beside the resolved list, so a process
+    catalogue without the "fasteners" alias cannot hide one. The folder is read
+    here rather than trusted to the stored process, which only learns about a
+    folder when the part is next saved.
+    """
+
+    from app.services.import_zip import _is_hardware_by_folder
+    from app.services.processmeta import normalize_processes
+
+    processes = [*normalized_processes(attrs, part_processes, meta), *normalize_processes(attrs or {}, {})]
+    if {str(p).strip().lower() for p in processes} & HARDWARE_TERMS:
+        return True
+    return _is_hardware_by_folder(attrs or {})
+
+
 def classify_part(attrs: Dict, part_processes: List[str], meta: Dict, category: str = "") -> str:
     proc_list = normalized_processes(attrs, part_processes, meta)
     proc_set = {p for p in (proc_list or []) if p}
     cat = _safe_lower(category or attrs.get("category"))
     material = _safe_lower(attrs.get("material") or attrs.get("Material") or "")
 
-    if proc_set & HARDWARE_TERMS or "hardware" in cat:
+    if is_hardware(attrs, part_processes, meta):
         return "hardware"
     if proc_set & PURCHASE_TERMS or "purchase" in cat or "purchased" in cat:
         return "purchase"

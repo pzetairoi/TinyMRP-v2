@@ -330,6 +330,15 @@ the pack is about gets a wider card on the first row, but it carries exactly
 the same information as the components below it. Bought and hardware parts are
 never stamped *not approved*, since nobody approves a catalogue screw.
 
+Hardware gets no card. It is listed in the **hardware summary** that closes the
+visual summary, on its own or inside a binder, so every part appears in exactly
+one of the two. A part counts as hardware when its process is *hardware* or
+*fasteners*, or when its file sits in a folder named under **App Settings →
+Hardware classification**. Its category plays no part. A fastener with neither
+is drawn as a card like any other part: if your SolidWorks files keep the
+process in the *Comments* property, add *comments* to the process field's
+import aliases in **Fields & exports** so TinyMRP reads it as the process.
+
 ### Binder options
 
 With the PDF binder selected you can add a cover page, index, visual list,

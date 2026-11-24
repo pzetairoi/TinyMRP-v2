@@ -507,32 +507,6 @@ def test_index_label_avoids_long_filenames(app, tmp_path):
     assert long_b not in text
 
 
-def test_hardware_category_override(app, tmp_path):
-    root_dir = tmp_path
-    app.config["FILE_ROOT_LOCAL"] = str(root_dir)
-
-    root = Part(part_number="ASM-HWOVR", revision="", description="Root Assembly", processes=["assembly"]).save()
-    child = Part(
-        part_number="HW-OVR",
-        revision="",
-        description="Washer",
-        processes=["hardware"],
-        category="part",
-    ).save()
-    BOMLink(parent_pn=root.part_number, parent_rev="", child_pn=child.part_number, child_rev="", qty=2).save()
-
-    opts = DocPackOptions(
-        root_pn=root.part_number,
-        root_rev="",
-        want_selected_files=False,
-        want_hardware_summary=True,
-    )
-    with app.app_context():
-        _, data, _ = build_docpack(opts)
-    text = _page_text(PdfReader(io.BytesIO(data)).pages[0])
-    assert "No hardware items found" in text
-
-
 def test_timezone_setting_applies_to_docpack(app, tmp_path):
     root_dir = tmp_path
     app.config["FILE_ROOT_LOCAL"] = str(root_dir)

@@ -18,7 +18,7 @@ from app.services.field_config import get_field_config, resolve_part_field_value
 from app.services.filenames import build_output_name
 from app.services.part_norm import clean_rev as _clean_rev
 from app.services.app_settings import format_display_ts, get_display_dt, resolve_brand_logo_path
-from app.services.insights import classify_part
+from app.services.insights import is_hardware
 from app.services.markup_documents import combine_markup_documents, markup_documents_for_pairs
 
 logger = logging.getLogger(__name__)
@@ -1651,34 +1651,17 @@ def _visual_list_pdf(
     return base_pdf
 
 
-def _norm_proc_name(val: object) -> str:
-    return " ".join(str(val or "").strip().lower().split())
-
-
-def _is_hardware_processes(processes: Iterable[str], alias_index: Dict[str, str]) -> bool:
-    for p in processes:
-        key = _norm_proc_name(p)
-        canon = alias_index.get(key, key)
-        if canon == "hardware":
-            return True
-    return False
-
-
-def _category_override_is_non_hardware(pdoc: Part, attrs: Dict[str, object]) -> bool:
-    cat = str(getattr(pdoc, "category", "") or attrs.get("category") or "").strip().lower()
-    return bool(cat and "hardware" not in cat)
+def _is_hardware_doc(pdoc: Optional[Part], attrs: Optional[Dict[str, object]] = None) -> bool:
+    # The visual summary leaves out exactly what the hardware summary lists:
+    # both ask this, so a part can land in one of them but never both or neither.
+    if not pdoc:
+        return False
+    meta = current_app.config.get("PROCESS_META", {}) or {}
+    return is_hardware(attrs if attrs is not None else harvest_part_attrs(pdoc), list(pdoc.processes or []), meta)
 
 
 def _is_hardware_part(pn: str, rev: str) -> bool:
-    pdoc = _part_by(pn, rev)
-    if not pdoc:
-        return False
-    attrs = harvest_part_attrs(pdoc)
-    if _category_override_is_non_hardware(pdoc, attrs):
-        return False
-    meta = current_app.config.get("PROCESS_META", {}) or {}
-    classification = classify_part(attrs, list(pdoc.processes or []), meta, category=getattr(pdoc, "category", ""))
-    return classification == "hardware"
+    return _is_hardware_doc(_part_by(pn, rev))
 
 
 def _hardware_summary_rows(pn_rev_qty: Iterable[Tuple[str, str, float]]) -> List[Dict[str, object]]:
@@ -1688,11 +1671,7 @@ def _hardware_summary_rows(pn_rev_qty: Iterable[Tuple[str, str, float]]) -> List
         if not pdoc:
             continue
         attrs = harvest_part_attrs(pdoc)
-        if _category_override_is_non_hardware(pdoc, attrs):
-            continue
-        meta = current_app.config.get("PROCESS_META", {}) or {}
-        classification = classify_part(attrs, list(pdoc.processes or []), meta, category=getattr(pdoc, "category", ""))
-        if classification != "hardware":
+        if not _is_hardware_doc(pdoc, attrs):
             continue
         resolved = resolve_part_field_values(
             pdoc,
@@ -3411,30 +3390,12 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                     val = pre_body_offset + int(sp)
                     if key not in first_page or val < first_page[key]:
                         first_page[key] = val
-                # Rebuild visual list with page numbers, over the same scope the
-                # first pass used - aggregated across the full BOM, or stopping
-                # at the immediate children when that is the chosen depth.
-                vis_full2 = _flat_or_override(
-                    opts.root_pn,
-                    opts.root_rev,
-                    full=(opts.depth != "top"),
-                    include_consumed=bool(opts.include_consumed),
-                    terminal_processes=["welding","purchase","machine"],
-                )
-                vis_filtered2: List[Tuple[str,str,float]] = []
-                for pn, rev, qty in vis_full2:
-                    p = _part_by(pn, rev)
-                    if not p:
-                        continue
-                    if not _passes_classified_filter(p, opts.classified_filter):
-                        continue
-                    if not _passes_process_filter(p, opts.processes, opts.process_mode):
-                        continue
-                    if _is_hardware_part(pn, rev):
-                        continue
-                    vis_filtered2.append((pn, rev, qty))
+                # Rebuild visual list with page numbers from the very rows the
+                # first pass drew. Walking the BOM again let the two disagree -
+                # a fabrication pack's second walk dropped consumed parts - and
+                # the index had already counted the first pass's pages.
                 vis_pdf2 = _visual_list_pdf(
-                    vis_filtered2,
+                    vis_filtered_visual,
                     opts.root_pn,
                     root_rev_resolved,
                     page_map=first_page,

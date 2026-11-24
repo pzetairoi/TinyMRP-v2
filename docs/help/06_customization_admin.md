@@ -29,8 +29,16 @@ Main admin modules:
 
 ### Hardware classification
 
-- Folder keywords used to classify hardware during ZIP import.
-- Case-insensitive matching.
+- Folder keywords that make a part hardware: a part whose file path contains
+  one is hardware whatever process its file carries. The defaults are
+  `toolbox`, `fasteners`, `fastener` and `hardware`.
+- Case-insensitive and matched anywhere in the path, so keep keywords specific:
+  `screws` would also catch a `lead screws` folder.
+- A part is also hardware when its process is *hardware* or *fasteners*. Its
+  category plays no part.
+- Doc packs, the dashboard and the Arena exports read the keywords as they
+  stand, so a change applies to them at once. **Save and recompute existing
+  parts** also updates the process stored on parts already imported.
 
 ### Flat pattern page filter
 

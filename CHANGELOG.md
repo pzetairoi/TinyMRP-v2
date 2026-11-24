@@ -7,6 +7,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ### Fixed
 
+- **One rule now decides what is hardware, and the visual summary leaves out
+  exactly what the hardware summary lists.** A part is hardware when its
+  process is hardware or fasteners, or when its file sits in a hardware folder
+  (Admin -> hardware folders). Doc packs, the dashboard, the part insights and
+  the Arena exports all ask that one rule. A fastener whose category read
+  "Fastener" or "Part" used to be drawn on the visual summary and missing from
+  the hardware summary, because any category without the word "hardware"
+  vetoed its process; category no longer makes or unmakes hardware. The folder
+  is read when the list is built, so a part stored before the folder rule, or
+  a folder added to the setting later, no longer needs a recompute to leave the
+  visual summary. A raw process column saying "Fasteners" counts even where the
+  process library lacks that alias. A fabrication pack binder's index no
+  longer points one page too far once its consumed parts fill a second visual
+  page: the page-numbered visual summary is drawn from the same rows the index
+  counted instead of a second BOM walk that left those parts out.
+
 - **A fastener in a hardware folder now stays hardware on every import.** A
   part whose folder or path names a hardware folder (Admin -> hardware folders;
   by default toolbox, fastener(s) and hardware) was already classed as

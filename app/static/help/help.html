@@ -478,6 +478,14 @@ QR code, process colour rings and an approved / not-approved stamp. The part
 the pack is about gets a wider card on the first row, but it carries exactly
 the same information as the components below it. Bought and hardware parts are
 never stamped <em>not approved</em>, since nobody approves a catalogue screw.</p>
+<p>Hardware gets no card. It is listed in the <strong>hardware summary</strong> that closes the
+visual summary, on its own or inside a binder, so every part appears in exactly
+one of the two. A part counts as hardware when its process is <em>hardware</em> or
+<em>fasteners</em>, or when its file sits in a folder named under <strong>App Settings →
+Hardware classification</strong>. Its category plays no part. A fastener with neither
+is drawn as a card like any other part: if your SolidWorks files keep the
+process in the <em>Comments</em> property, add <em>comments</em> to the process field's
+import aliases in <strong>Fields &amp; exports</strong> so TinyMRP reads it as the process.</p>
 <h3 id="binder-options">Binder options</h3>
 <p>With the PDF binder selected you can add a cover page, index, visual list,
 where-used report, datasheets, hardware summary, page numbers and flat
@@ -2109,8 +2117,16 @@ the customer demand the job exists to fulfil, so it is listed under <code>Relate
 </ul>
 <h3 id="hardware-classification">Hardware classification</h3>
 <ul>
-<li>Folder keywords used to classify hardware during ZIP import.</li>
-<li>Case-insensitive matching.</li>
+<li>Folder keywords that make a part hardware: a part whose file path contains
+one is hardware whatever process its file carries. The defaults are
+<code>toolbox</code>, <code>fasteners</code>, <code>fastener</code> and <code>hardware</code>.</li>
+<li>Case-insensitive and matched anywhere in the path, so keep keywords specific:
+<code>screws</code> would also catch a <code>lead screws</code> folder.</li>
+<li>A part is also hardware when its process is <em>hardware</em> or <em>fasteners</em>. Its
+category plays no part.</li>
+<li>Doc packs, the dashboard and the Arena exports read the keywords as they
+stand, so a change applies to them at once. <strong>Save and recompute existing
+parts</strong> also updates the process stored on parts already imported.</li>
 </ul>
 <h3 id="flat-pattern-page-filter">Flat pattern page filter</h3>
 <ul>

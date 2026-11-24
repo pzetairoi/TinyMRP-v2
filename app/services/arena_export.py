@@ -22,7 +22,7 @@ from app.services.part_norm import clean_rev
 
 import re
 from flask import current_app, has_app_context
-from app.services.insights import HARDWARE_TERMS, PURCHASE_TERMS, normalized_processes as normalized_process_list
+from app.services.insights import HARDWARE_TERMS, PURCHASE_TERMS, is_hardware, normalized_processes as normalized_process_list
 
 
 _ARENA_PROCUREMENT_HEADER = "procurement type"
@@ -499,10 +499,11 @@ def _process_terms(part: Part) -> set[str]:
 def _is_hardware_or_fastener(part: Optional[Part]) -> bool:
     if not part:
         return False
-    return bool(_process_terms(part) & HARDWARE_TERMS)
+    meta = current_app.config.get("PROCESS_META", {}) if has_app_context() else {}
+    return is_hardware(harvest_part_attrs(part), list(getattr(part, "processes", []) or []), meta)
 
 
 def _procurement_type(part: Optional[Part]) -> str:
-    if part and _process_terms(part) & _OTS_PROCESS_TERMS:
+    if part and (_is_hardware_or_fastener(part) or _process_terms(part) & _OTS_PROCESS_TERMS):
         return "OTS"
     return "MTS"
